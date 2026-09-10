@@ -1,7 +1,7 @@
 import type { RepoInfo } from '../types.js';
 
 const SUPPORTED_URL_HINT =
-  'expected https://host/group/repo.git, ssh://git@host/group/repo.git, or git@host:group/repo.git';
+  'expected http(s)://host/group/repo.git, ssh://git@host/group/repo.git, or git@host:group/repo.git';
 
 function invalidRepoUrl(reason?: string): Error {
   const detail = reason ? `: ${reason}` : '';
@@ -33,21 +33,22 @@ function buildRepoInfo(owner: string, repo: string, remoteUrl: string): RepoInfo
     owner,
     repo,
     // RepoInfo predates generic Git hosts. For this provider the field stores
-    // the canonical clone URL, which may use HTTPS or SSH.
+    // the canonical clone URL, which may use HTTP(S) or SSH.
     httpsUrl: remoteUrl,
     projectId: encodeURIComponent(`${owner}/${repo}`),
   };
 }
 
-/** Parse a full HTTPS or SSH clone URL for an arbitrary Git host. */
+/**
+ * Parse a full HTTP(S) or SSH clone URL for an arbitrary Git host.
+ *
+ * Plain `http://` is accepted because self-hosted / intranet Git servers are
+ * often HTTP-only. The scheme is preserved verbatim, never upgraded to HTTPS.
+ */
 export function parseGenericGitRepoInput(input: string): RepoInfo {
   const trimmed = input.trim();
 
-  if (/^http:\/\//i.test(trimmed)) {
-    throw invalidRepoUrl('plain HTTP is not supported; use HTTPS or SSH');
-  }
-
-  if (/^https:\/\//i.test(trimmed) || /^ssh:\/\//i.test(trimmed)) {
+  if (/^https?:\/\//i.test(trimmed) || /^ssh:\/\//i.test(trimmed)) {
     let parsed: URL;
     try {
       parsed = new URL(trimmed);

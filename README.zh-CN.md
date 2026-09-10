@@ -17,13 +17,20 @@ TeamAI 统一管理团队的 Skills、Rules、MCP 和知识，驾驭 Claude Code
 
 ### 安装
 
+本分支增加了 Gitea provider，发布在内部 Gitea registry，不在公共 npm 上。
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm i -g @agent/teamai-cli
 ```
+
+读取 registry 是匿名的，安装不需要 token。这里必须用 `npm config set`，因为全局安装不会读取项目目录下的 `.npmrc`。
+
+上游版本在公共 npm 上，用 `npm install -g teamai-cli` 安装，但不含 Gitea provider。
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
+在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
 
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Use this template** 生成自己的仓库，再对它执行 `teamai init`。
 
@@ -84,7 +91,7 @@ teamai init https://github.com/yourorg/yourrepo --scope user
   </tbody>
 </table>
 
-**Git 托管平台** —— GitHub · GitLab · GitCode · CNB · TGit · 私有 Git 服务。
+**Git 托管平台** —— GitHub · GitLab · GitCode · CNB · TGit · Gitea · 私有 Git 服务。
 
 ### 分发策略
 

@@ -17,13 +17,20 @@ TeamAI manages your team's skills, rules, MCP, and knowledge across Claude Code,
 
 ### Install
 
+This fork adds the Gitea provider and is published to our internal Gitea registry, not to public npm.
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm i -g @agent/teamai-cli
 ```
+
+Reading the registry is anonymous, so no token is needed to install. `npm config set` is required because a project-local `.npmrc` is not consulted by a global install.
+
+Upstream releases are on public npm as `npm install -g teamai-cli`, but they do not include the Gitea provider.
 
 ### Team admin / solo user
 
-Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
+Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
 
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
@@ -84,7 +91,7 @@ Once initialized, every AI session automatically pulls the latest skills / rules
   </tbody>
 </table>
 
-**Git providers** — GitHub · GitLab · GitCode · CNB · TGit · private Git service.
+**Git providers** — GitHub · GitLab · GitCode · CNB · TGit · Gitea · private Git service.
 
 ### Distribution Controls
 
