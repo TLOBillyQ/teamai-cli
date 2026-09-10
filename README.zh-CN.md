@@ -117,7 +117,7 @@ teamai push → 创建分支 + MR → reviewer 审批合并
            SessionStart hook → teamai pull → 同步到本地 AI 工具
 ```
 
-成员通过 `teamai push` 提交变更并创建合并请求供审核。若某个资源已在未合并的 PR 中等待评审，再次对它执行 `teamai push` 会就地更新该 PR，而非新开一个重复的 PR。合并后，`teamai pull`（由 SessionStart hook 在会话启动时自动触发）将最新资源同步到本地。Skills 会同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/` 等目录。对于 Codex，若 skill 已存在于 `~/.agents/skills/`，则会在原位置更新，不会在 `~/.codex/skills/` 创建重复副本。在 **project scope** 安装下，SessionStart 会先为当前工具创建项目根目录（例如 `<project>/.claude`），再 pull 写入；单独执行 `teamai pull` 仍不会凭空创建 Agent 目录。
+成员通过 `teamai push` 提交变更并创建合并请求供审核。若某个资源已在未合并的 PR 中等待评审，再次对它执行 `teamai push` 会就地更新该 PR，而非新开一个重复的 PR。合并后，`teamai pull`（由 SessionStart hook 在会话启动时自动触发）将最新资源同步到本地。Skills 会同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/` 等目录。对于 Codex，若 skill 已存在于 `~/.agents/skills/`，则会在原位置更新，不会在 `~/.codex/skills/` 创建重复副本。在 **project scope** 安装下，SessionStart 会先为当前工具创建项目根目录（例如 `<project>/.claude`），再 pull 写入；单独执行 `teamai pull` 仍不会凭空创建 Agent 目录，用 `teamai init --agent <id>` 显式启用过的工具除外。因目录缺失而被跳过的工具会在 pull 输出里列出：正常情况下汇总成一行，一个都没装上或加 `--verbose` 时逐个列出确切路径。
 
 ### 团队 Hooks
 
@@ -279,6 +279,7 @@ WASM 解析器是纯 JavaScript 依赖，无需任何原生编译工具链。若
 | `teamai codebase --lint` | 知识图谱健康检查 |
 | `teamai ci extract-mr --url <url>` | CI：从 MR 提取知识、发评论、合并后写入 |
 | `teamai members` | 查看团队成员 |
+| `teamai members register` | 把自己注册为团队成员（幂等；用于重试 `teamai init` 未能推送的注册） |
 | `teamai roles` | 管理团队角色和命名空间 |
 | `teamai tags` | 管理基于标签的 skill/rule 过滤 |
 | `teamai skill exclude add/remove/list` | 管理不参与本地同步的 skills（[使用指南](docs/usage-guide.zh-CN.md#排除个人不需要的-skill)） |

@@ -130,7 +130,11 @@ teamai init https://github.com/yourorg/yourrepo
 无 teamai 残留，且同一仓库的 `git worktree` 共享同一分区。各 Agent 的项目根目录
 （`.claude/`、`.cursor/`、`.codebuddy/` 等）仍在工作区内、于 **SessionStart** 时按刚打开的
 工具创建。例如，打开 Claude Code 时会创建 `.claude/`，再由 pull 写入。单独执行 `teamai pull`
-仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录。
+仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录；唯一的例外
+是你显式启用过的工具（`teamai init --agent <id>`，或 `teamai init .` 的多选），pull 会为它创建目录，
+确保 skills 真正落盘。被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
+一个都没装上或加了 `--verbose` 时，逐个列出缺失的确切路径，例如
+`kimi: skipped - <project>/.kimi-code not found`。
 
 > **从旧版 teamai 升级？** 升级后首次执行 `teamai init` / `pull` / `push` 会自动把已有的
 > `<repo>/.teamai/` 迁移进分区（复制 → 校验 → 原子切换），并把旧目录保留为
@@ -349,6 +353,7 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # 查看状态
 teamai members                      # 查看团队成员
+teamai members register             # 把自己注册为成员（幂等；重试 init 未完成的注册）
 teamai list                         # 全部资源类型（skills|rules|docs|env|agents|hooks|mcp）+ 本地 skills
 teamai list mcp                     # 只看团队 MCP servers
 teamai list --source repo           # 只看团队仓库
@@ -1461,7 +1466,7 @@ teamai pull
 
 **Q: `teamai init` 提示已初始化？**
 
-交互模式下会提示是否覆盖，输入 `y` 即可。也可用 `--force` 跳过确认：
+交互模式下会提示是否覆盖，输入 `y` 即可。如果只是想补一次成员注册，直接执行 `teamai members register`，不必重新 init。也可用 `--force` 跳过确认：
 
 ```bash
 teamai init --repo https://github.com/yourorg/yourrepo --force
@@ -1469,7 +1474,28 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 
 **Q: 在项目里执行 `teamai init` 后没有 `.claude/`（或 `.cursor/`、`.codebuddy/`）目录？**
 
-这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录。
+这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录；用 `teamai init --agent <id>` 显式启用过的工具除外。
+
+**Q: pull 显示 "Synced N skills"，但实际什么都没装上？**
+
+说明工具目录不存在，所有 target 都被跳过了。pull 会逐个列出原因：
+
+```
+[project] kimi: skipped - D:\work\myrepo\.kimi-code not found
+[project] No AI tool directories found under D:\work\myrepo - nothing was installed.
+```
+
+两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents`，此后 pull 会为它创建目录。
+
+**Q: `teamai init` 提示成员注册没有推送成功？**
+
+配置已经写好、可以正常使用，但你还没出现在 `teamai members` 里（通常是缺少 Git 身份或没有网络）。修好原因后只补注册即可，无需重新 init：
+
+```bash
+teamai members register
+```
+
+这种情况下 init 以非 0 退出码结束，便于安装脚本发现。
 
 **Q: Hooks 没有自动触发？**
 

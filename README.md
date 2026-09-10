@@ -117,7 +117,7 @@ teamai push → create branch + MR → reviewer approves + merges
               SessionStart hook → teamai pull → synced to local AI tools
 ```
 
-Members push changes via `teamai push`, which opens a Merge Request for review. Re-running `teamai push` on a resource that is still waiting in an unmerged PR updates that PR in place instead of opening a duplicate. Once merged, `teamai pull` (triggered automatically on session start via the SessionStart hook) syncs the latest resources locally. Skills sync to `~/.claude/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.codebuddy/skills/`, etc. For Codex, an existing skill under `~/.agents/skills/` is updated there instead of duplicated under `~/.codex/skills/`. In a **project-scope** install, SessionStart first creates that tool's project root (e.g. `<project>/.claude`) if it is missing, then pulls into it — a bare `teamai pull` still will not invent agent directories.
+Members push changes via `teamai push`, which opens a Merge Request for review. Re-running `teamai push` on a resource that is still waiting in an unmerged PR updates that PR in place instead of opening a duplicate. Once merged, `teamai pull` (triggered automatically on session start via the SessionStart hook) syncs the latest resources locally. Skills sync to `~/.claude/skills/`, `~/.codex/skills/`, `~/.cursor/skills/`, `~/.codebuddy/skills/`, etc. For Codex, an existing skill under `~/.agents/skills/` is updated there instead of duplicated under `~/.codex/skills/`. In a **project-scope** install, SessionStart first creates that tool's project root (e.g. `<project>/.claude`) if it is missing, then pulls into it — a bare `teamai pull` still will not invent agent directories, except for tools you enabled explicitly with `teamai init --agent <id>`. Tools skipped because their directory is missing are named in the pull output (summarized on one line, or listed with their exact paths when nothing installed or under `--verbose`).
 
 ### Team Hooks
 
@@ -279,6 +279,7 @@ Insight into how the team actually uses its AI tools, and a starting point for t
 | `teamai codebase --lint` | Knowledge graph health check |
 | `teamai ci extract-mr --url <url>` | CI: extract knowledge from MR, post comments, write after merge |
 | `teamai members` | List team members |
+| `teamai members register` | Register yourself as a team member (idempotent; retries a registration that `teamai init` could not push) |
 | `teamai roles` | Manage team roles and namespaces |
 | `teamai tags` | Manage tag-based skill/rule filtering |
 | `teamai skill exclude add/remove/list` | Manage skills excluded from local sync ([usage guide](docs/usage-guide.md#excluding-skills-you-dont-need)) |

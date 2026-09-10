@@ -178,8 +178,8 @@ export async function bootstrapSelfRepo(
     // Seed the tool skills-dir so hooks + skills inject on this fresh clone
     // (isToolInstalled would otherwise skip everything — no <repo>/.claude yet).
     try {
-      const { seedSelfModeToolDirs } = await import('./known-agents.js');
-      await seedSelfModeToolDirs(localConfig, teamConfig);
+      const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+      await ensureEnabledAgentDirs(localConfig, teamConfig);
     } catch (e) {
       log.debug(`[bootstrap] tool-dir seeding skipped: ${(e as Error).message}`);
     }
@@ -201,11 +201,8 @@ export async function bootstrapSelfRepo(
       await ensureDir(memberDir);
       const memberPath = path.join(memberDir, `${username}.yaml`);
       if (!(await pathExists(memberPath))) {
-        await writeFile(memberPath, YAML.stringify({
-          username,
-          displayName: username,
-          registeredAt: new Date().toISOString(),
-        }));
+        const { buildMemberYaml } = await import('./members.js');
+        await writeFile(memberPath, buildMemberYaml(username));
         await commitAndPushReports(localConfig, `[teamai] Register member: ${username}`, ['members/']);
       }
     } catch (e) {

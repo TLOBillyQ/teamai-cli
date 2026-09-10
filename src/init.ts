@@ -332,6 +332,7 @@ export async function initHttp(
     const confirmed = await askConfirmation(`teamai already initialized at ${existingConfigPath}. Overwrite? [y/N] `);
     if (!confirmed) {
       log.info('Aborted. Existing config is unchanged.');
+      log.info('To only (re)register yourself as a team member, run `teamai members register`.');
       return;
     }
   }
@@ -696,6 +697,7 @@ export async function initSelfRepo(options: GlobalOptions & {
       const confirmed = await askConfirmation('Overwrite existing config? [y/N] ');
       if (!confirmed) {
         log.info('Aborted. Existing config is unchanged.');
+        log.info('To only (re)register yourself as a team member, run `teamai members register`.');
         return;
       }
     }
@@ -793,7 +795,7 @@ export async function initSelfRepo(options: GlobalOptions & {
   // Which AI tools to set up in this repo (create skills dir + inject hooks +
   // commit their settings.json). Resolved from --agent, else HOME detection
   // (non-interactive), else an interactive picker. Written to enabledAgents,
-  // which drives seedSelfModeToolDirs and hook injection alike.
+  // which drives ensureEnabledAgentDirs and hook injection alike.
   const selectedAgents = await promptForSelfModeAgents(options);
   if (selectedAgents.length > 0) {
     const existing = await loadLocalConfigForScope('project', businessRepoRoot);
@@ -835,8 +837,8 @@ export async function initSelfRepo(options: GlobalOptions & {
   // otherwise skip everything).
   const filterAgents = selectedAgents.length > 0 ? selectedAgents : undefined;
   try {
-    const { seedSelfModeToolDirs } = await import('./known-agents.js');
-    const seeded = await seedSelfModeToolDirs(localConfig, teamConfig);
+    const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+    const seeded = await ensureEnabledAgentDirs(localConfig, teamConfig);
     if (seeded.length > 0) log.debug(`Seeded tool dirs for: ${seeded.join(', ')}`);
   } catch (e) {
     log.debug(`Tool-dir seeding skipped: ${(e as Error).message}`);
@@ -894,6 +896,9 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
 
   // Step 6: register member on the reports orphan branch (never touches main / active tree).
+  // Non-null when the push did not land; the closing summary reports it instead
+  // of claiming success (see logMemberRegistrationOutcome).
+  let memberRegistrationError: string | null = null;
   if (!options.dryRun) {
     try {
       const { ensureReportsWorktree, commitAndPushReports } = await import('./utils/reports-branch.js');
@@ -902,20 +907,24 @@ export async function initSelfRepo(options: GlobalOptions & {
       await ensureDir(memberDir);
       const memberPath = path.join(memberDir, `${username}.yaml`);
       if (!await pathExists(memberPath)) {
-        await writeFile(memberPath, YAML.stringify({
-          username,
-          displayName: username,
-          registeredAt: new Date().toISOString(),
-        }));
+        const { buildMemberYaml } = await import('./members.js');
+        await writeFile(memberPath, buildMemberYaml(username));
         const pushed = await commitAndPushReports(localConfig, `[teamai] Register member: ${username}`, ['members/']);
         if (pushed) {
           log.success('Member registered on the teamai-reports branch');
         } else {
+          memberRegistrationError = 'the commit or push to the teamai-reports branch did not land (see the git error above)';
           log.warn('Member registration could not be pushed (no write access?). You are still set up locally.');
         }
+      } else {
+        // The file can also be a leftover from an earlier init whose push failed,
+        // which this run cannot tell apart from a genuine registration.
+        log.info(`Member ${username} is already registered locally.`);
+        log.info('If you do not show up in `teamai members`, run `teamai members register`.');
       }
     } catch (e) {
-      log.warn(`Member registration skipped (non-blocking): ${(e as Error).message}`);
+      memberRegistrationError = (e as Error).message;
+      log.warn(`Member registration skipped (non-blocking): ${memberRegistrationError}`);
     }
   }
 
@@ -928,7 +937,7 @@ export async function initSelfRepo(options: GlobalOptions & {
     // state may not exist yet
   }
 
-  log.success('teamai initialized (single-repo mode)!');
+  logMemberRegistrationOutcome(memberRegistrationError, 'teamai initialized (single-repo mode)!');
   log.info('Next steps:');
   log.info('  1. Add team resources by dropping them into .teamai/ (or author them in your AI tool as usual):');
   log.info('       .teamai/skills/    team skills');
@@ -1020,6 +1029,7 @@ export async function init(options: GlobalOptions & {
       const confirmed = await askConfirmation('Overwrite existing config? [y/N] ');
       if (!confirmed) {
         log.info('Aborted. Existing config is unchanged.');
+        log.info('To only (re)register yourself as a team member, run `teamai members register`.');
         return;
       }
     }
@@ -1222,13 +1232,12 @@ export async function init(options: GlobalOptions & {
   // Step 5: Create member file
   const memberPath = path.join(localPath, 'members', `${username}.yaml`);
   const isNewMember = !await pathExists(memberPath);
+  // Non-null when the registration push failed; surfaced again by the closing
+  // summary so a half-finished init can't pass for a successful one.
+  let memberRegistrationError: string | null = null;
   if (isNewMember) {
-    const memberYaml = YAML.stringify({
-      username,
-      displayName: username,
-      registeredAt: new Date().toISOString(),
-    });
-    await writeFile(memberPath, memberYaml);
+    const { buildMemberYaml } = await import('./members.js');
+    await writeFile(memberPath, buildMemberYaml(username));
     log.success(`Registered as team member: ${username}`);
 
     if (!options.dryRun) {
@@ -1243,11 +1252,15 @@ export async function init(options: GlobalOptions & {
         ]);
         log.success('Member registration pushed to team repo');
       } catch (e) {
-        log.warn(`Push failed (you can push manually later): ${(e as Error).message}`);
+        memberRegistrationError = (e as Error).message;
+        log.warn(`Member registration push failed: ${memberRegistrationError}`);
       }
     }
   } else {
+    // May also be a leftover from an earlier init whose push failed — this run
+    // cannot tell that apart from a registration that reached the remote.
     log.info(`Member ${username} already registered`);
+    log.info('If you do not show up in `teamai members`, run `teamai members register`.');
   }
 
   // Step 5.5: Configure default MR reviewers (only for fresh setup with no reviewers yet).
@@ -1395,11 +1408,45 @@ export async function init(options: GlobalOptions & {
     }
   }
 
-  log.success('teamai initialized successfully!');
-  log.info('Built-in skills (e.g. team-wiki-codebase) are ready to use in your IDE now.');
-  log.info('Skills, rules, env and docs will auto-sync on each session start (via hooks).');
-  log.info('Run `teamai status` to check current config.');
+  logInitOutcome(memberRegistrationError);
 
   // Close the readline singleton so the process can exit cleanly.
   closePrompt();
+}
+
+/**
+ * Print the closing status line of `teamai init`, shared by the clone-based and
+ * single-repo flows (they differ only in their success wording).
+ *
+ * The member-registration push is best-effort (it needs a git identity and
+ * network), but a partial init used to end on `✔ teamai initialized
+ * successfully!` with exit 0 — the earlier `⚠ Push failed` line was easy to miss
+ * by eye and invisible to a script, leaving a member who is silently absent from
+ * `teamai members`. When registration did not land, the summary says so, points
+ * at the retry command, and exits non-zero. The local config is written either
+ * way, so the failure is recoverable without a re-init.
+ *
+ * @param memberRegistrationError - Why registration was not pushed, or null when
+ *   it landed (or was not attempted, e.g. an already-registered member).
+ * @param successLine - Line to print when registration is not a problem.
+ */
+export function logMemberRegistrationOutcome(
+  memberRegistrationError: string | null,
+  successLine: string,
+): void {
+  if (memberRegistrationError) {
+    log.warn(`teamai is configured, but member registration was not pushed: ${memberRegistrationError}`);
+    log.warn('You will not appear in `teamai members` until it succeeds.');
+    log.info('Fix the cause (e.g. `git config --global user.email "you@example.com"`), then run `teamai members register`.');
+    process.exitCode = 1;
+  } else {
+    log.success(successLine);
+  }
+}
+
+export function logInitOutcome(memberRegistrationError: string | null): void {
+  logMemberRegistrationOutcome(memberRegistrationError, 'teamai initialized successfully!');
+  log.info('Built-in skills (e.g. team-wiki-codebase) are ready to use in your IDE now.');
+  log.info('Skills, rules, env and docs will auto-sync on each session start (via hooks).');
+  log.info('Run `teamai status` to check current config.');
 }

@@ -134,7 +134,12 @@ project roots (`.claude/`, `.cursor/`, `.codebuddy/`, …) are still created ins
 workspace on **SessionStart** for the tool that just opened. For example, opening
 Claude Code creates `.claude/`, then pull writes into it. A bare `teamai pull` still
 skips tools whose project root does not exist, so it never invents agent directories
-for tools you have not opened in this project.
+for tools you have not opened in this project — the one exception is a tool you
+enabled explicitly (`teamai init --agent <id>`, or the picker in `teamai init .`),
+whose directory pull creates so its skills actually land. Skipped tools are named in
+the pull output — on one summary line when at least one target did install, and one
+line per target (with the exact missing path) when nothing installed or when you pass
+`--verbose`, e.g. `kimi: skipped - <project>/.kimi-code not found`.
 
 > **Upgrading from an older teamai?** The first `teamai init` / `pull` / `push` after
 > upgrading automatically migrates an existing `<repo>/.teamai/` into the partition
@@ -361,6 +366,7 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # View status
 teamai members                      # View team members
+teamai members register             # Register yourself (idempotent; retry a failed init registration)
 teamai list                         # All resource types (skills|rules|docs|env|agents|hooks|mcp) + local skills
 teamai list mcp                     # Only team MCP servers
 teamai list --source repo           # Team repo only
@@ -1483,7 +1489,7 @@ Yes, but project scope remains isolated by default. When the current working dir
 
 **Q: `teamai init` says it's already initialized?**
 
-In interactive mode, you'll be asked whether to overwrite — type `y` to confirm. You can also use `--force` to skip the confirmation:
+In interactive mode, you'll be asked whether to overwrite — type `y` to confirm. If all you need is to (re)register yourself as a member, run `teamai members register` instead of re-running init. You can also use `--force` to skip the confirmation:
 
 ```bash
 teamai init --repo https://github.com/yourorg/yourrepo --force
@@ -1491,7 +1497,28 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 
 **Q: After `teamai init` in a project, there is no `.claude/` (or `.cursor/`, `.codebuddy/`) directory?**
 
-That is expected. `init` does not know which agent you will open. Open Claude Code / Cursor / CodeBuddy in the project: the SessionStart hook creates that tool's project root and then pulls. A bare `teamai pull` will not create missing agent roots.
+That is expected. `init` does not know which agent you will open. Open Claude Code / Cursor / CodeBuddy in the project: the SessionStart hook creates that tool's project root and then pulls. A bare `teamai pull` will not create missing agent roots, except for tools you enabled explicitly with `teamai init --agent <id>`.
+
+**Q: `pull` says "Synced N skills" but nothing was installed?**
+
+The tool directory does not exist, so every target was skipped. Pull names each one:
+
+```
+[project] kimi: skipped - D:\work\myrepo\.kimi-code not found
+[project] No AI tool directories found under D:\work\myrepo - nothing was installed.
+```
+
+Fix it either by opening the tool once (it creates its own directory, then SessionStart pulls), or by enabling it explicitly - `teamai init --agent kimi` records the tool in `enabledAgents` and pull creates its directory from then on.
+
+**Q: `teamai init` warned that member registration was not pushed?**
+
+The config is written and usable, but you are not listed in `teamai members` (usually a missing Git identity, or no network). Fix the cause, then retry just the registration - no re-init needed:
+
+```bash
+teamai members register
+```
+
+Init exits non-zero in that case, so a setup script can detect it.
 
 **Q: Hooks aren't firing automatically?**
 
