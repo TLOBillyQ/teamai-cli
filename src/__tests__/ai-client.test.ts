@@ -33,6 +33,7 @@ import {
   callClaudeParallel,
   pickWindowsCommand,
   resolveCliPath,
+  resetCliPathCache,
 } from '../utils/ai-client.js';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -263,6 +264,7 @@ const execFileSyncMock = vi.mocked(execFileSync) as unknown as {
 describe('resolveCliPath', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCliPathCache();
   });
 
   it('win32：走 where，返回 where 输出里可启动的那条路径', () => {

@@ -157,6 +157,14 @@ describe('resolveActiveProjects — the "all" selector', () => {
     });
   });
 
+  it('treats a repeated "all" as a single selector rather than a mixed list', async () => {
+    await withRepo(MANY, async (repo) => {
+      expect(await resolveActiveProjects(repo, 'all,all')).toEqual(
+        await resolveActiveProjects(repo, ALL_PROJECTS_SELECTOR),
+      );
+    });
+  });
+
   it('keeps a project literally named "all" reachable via the expansion', async () => {
     await withRepo(SHADOWING, async (repo) => {
       expect(await resolveActiveProjects(repo, ALL_PROJECTS_SELECTOR)).toEqual({

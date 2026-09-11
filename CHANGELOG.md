@@ -10,10 +10,15 @@ All notable changes to this project will be documented in this file. See [standa
 - Data partitions auto-migrate a legacy `.teamai`, resume interrupted migrations, smoke-check the clone, and keep a git-ignored backup ([#439](https://github.com/Tencent/teamai-cli/pull/439), for [#374](https://github.com/Tencent/teamai-cli/issues/374)).
 - Kimi Code CLI hook support: `teamai pull` / `hooks inject` merge the six built-in hooks as `[[hooks]]` entries into the user-level `~/.kimi-code/config.toml` (idempotent, user entries preserved), `teamai uninstall` removes exactly the teamai entries, and hook dispatch maps kimi's `TodoList` tool and Stop protocol (for #5).
 - Kimi Code CLI is a first-class target: `--agent kimi` and HOME detection cover it, skills and subagents land in `.kimi-code/` (tool names mapped to Kimi ids), and team rules are inlined into a managed block of `.kimi-code/AGENTS.md` because Kimi has no rules directory (#10, for #8).
+- `teamai init --project all` activates every project declared in `manifest/projects.yaml` ([#518](https://github.com/Tencent/teamai-cli/pull/518)).
+- `teamai pull` can populate git submodules of the team repo when `teamai.yaml` sets `submodules: true` ([#501](https://github.com/Tencent/teamai-cli/pull/501)).
 
 ### 🐛 Bug Fixes
 
 - `enabledAgents` now also gates CLI builtin deploy, CLAUDE.md-class injects, and last-pull skip-sync targets, so an already-installed tool outside the whitelist is not written to ([#510](https://github.com/Tencent/teamai-cli/issues/510)).
+- `teamai codebase --extract` always writes an evidence `_manifest.json` (deterministic fallback when AI enrich is skipped or yields nothing, existing manifests kept) so `--deep-enrich` can start; the hidden `deep-enrich` command now exits non-zero when it cannot complete ([#508](https://github.com/Tencent/teamai-cli/issues/508)).
+- Self-update resolves npm and the install prefix from the running CLI so it works from PATH-less hook subprocesses ([#502](https://github.com/Tencent/teamai-cli/pull/502)).
+- The `gh` / `cnb` CLIs are resolved with the native `where` on Windows and launched through their `.cmd` shims; lookups are cached per process ([#520](https://github.com/Tencent/teamai-cli/pull/520)).
 - `teamai status` counts rule files in subdirectories recursively ([#437](https://github.com/Tencent/teamai-cli/pull/437)).
 - Codex Stop-phase contribution hints are deferred to the next prompt, so the host no longer rejects `additionalContext` ([#441](https://github.com/Tencent/teamai-cli/pull/441)).
 

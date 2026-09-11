@@ -1,33 +1,59 @@
 /**
- * 跨平台命令探测：把一个 CLI 名称解析成"该平台上真正能被 Node 启动"的绝对路径。
+ * Cross-platform command lookup: resolve a CLI name to the absolute path that
+ * Node can actually launch on the current platform.
  *
- * 从 `utils/ai-client.ts` 抽出——同一套坑（Windows 上 `which` 返回 MSYS 路径、
- * npm shim 无扩展名项排第一）在 provider 的 CLI 包装层（`providers/github/gh-cli.ts`、
- * `providers/cnb/cnb-cli.ts`）里重复出现，因此收敛到一处。
+ * Extracted from `utils/ai-client.ts`. The same pitfalls (`which` printing an
+ * MSYS path on Windows, the extension-less npm shim sorting first) showed up
+ * again in the provider CLI wrappers (`providers/github/gh-cli.ts`,
+ * `providers/cnb/cnb-cli.ts`), so the logic lives in one place.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-/** CLI 探测超时（毫秒），防止 execFileSync 挂死。 */
+/** Timeout (ms) for a single probe so execFileSync can never hang the CLI. */
 export const CLI_DETECT_TIMEOUT_MS = 5_000;
 
 /**
- * 可按扩展名直接启动的 Windows 可执行后缀，按 PATHEXT 优先级排列。
+ * Windows executable extensions that CreateProcess can start directly, in
+ * PATHEXT priority order.
  *
- * `npm install -g` 在 Windows 上同时生成三个 shim：无扩展名的 POSIX 脚本、
- * `<cmd>.cmd`、`<cmd>.ps1`。无扩展名的那个 CreateProcess 无法启动。
+ * `npm install -g` on Windows emits three shims: an extension-less POSIX
+ * script, `<cmd>.cmd`, and `<cmd>.ps1`. The extension-less one cannot be
+ * launched by CreateProcess.
  */
 export const WIN_EXEC_EXTENSIONS = ['.exe', '.cmd', '.bat'] as const;
 
 /**
- * 从 `where <cmd>` 的输出中挑出可启动的那一条。
+ * Only plain command names are accepted. The POSIX strategies interpolate the
+ * name into `command -v <cmd>` inside a login shell, so anything with shell
+ * metacharacters or path separators must be rejected up front.
+ */
+const SAFE_COMMAND_NAME = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Per-process cache keyed by `<platform>:<cmd>`. Resolving on POSIX spawns a
+ * login shell (sourcing ~/.bash_profile, nvm, etc.), which easily costs
+ * hundreds of milliseconds; callers such as `ghExec` / `cnbExec` resolve on
+ * every invocation, so the result is memoised for the lifetime of the process.
+ * A miss (`null`) is cached too — `resetCliPathCache()` clears it after an
+ * install step so the next probe sees the new binary.
+ */
+const cache = new Map<string, string | null>();
+
+/** Forget every cached lookup (used after installing a CLI, and by tests). */
+export function resetCliPathCache(): void {
+  cache.clear();
+}
+
+/**
+ * Pick the launchable entry from `where <cmd>` output.
  *
- * `where` 会列出所有匹配项，且顺序上无扩展名的 POSIX shim 往往排在前面
- * （例如 `C:\npm\claude` 先于 `C:\npm\claude.cmd`）。无扩展名的文件
- * CreateProcess 无法启动，因此这里只接受可执行后缀。
+ * `where` lists every match, and the extension-less POSIX shim usually comes
+ * first (e.g. `C:\npm\claude` before `C:\npm\claude.cmd`). That file cannot be
+ * started by CreateProcess, so only executable extensions are accepted.
  *
- * @param whereOutput  `where <cmd>` 的原始 stdout
- * @returns            首个可启动路径；没有可执行后缀时返回 null
+ * @param whereOutput  raw stdout of `where <cmd>`
+ * @returns            first launchable path, or null when none has an executable extension
  */
 export function pickWindowsCommand(whereOutput: string): string | null {
   const lines = whereOutput
@@ -43,13 +69,11 @@ export function pickWindowsCommand(whereOutput: string): string | null {
 }
 
 /**
- * 用 Windows 原生命令 `where` 解析候选 CLI，返回真正的 Windows 路径。
+ * Resolve a CLI with the native Windows `where` command, which returns real
+ * Windows paths (`C:\...\claude.cmd`) that the Windows API understands.
  *
- * `where` 是 `which` 的 Windows 原生等价物，返回 `C:\...\claude.cmd` 这类
- * Windows API 能识别的路径。
- *
- * @param cmd  候选命令名
- * @returns    存在且可启动的绝对路径；未安装时返回 null
+ * @param cmd  command name
+ * @returns    existing, launchable absolute path; null when not installed
  */
 function whereOnWindows(cmd: string): string | null {
   try {
@@ -62,22 +86,23 @@ function whereOnWindows(cmd: string): string | null {
     const p = pickWindowsCommand(out);
     return p !== null && existsSync(p) ? p : null;
   } catch {
-    // where 未找到时退出码非 0（stderr 为 "INFO: Could not find files..."），走这里
+    // `where` exits non-zero when nothing matches ("INFO: Could not find files...").
     return null;
   }
 }
 
 /**
- * POSIX 侧的策略链，依次尝试各 shell 环境，返回第一个解析成功且真实存在的路径：
- *   1. `bash -lc command -v <cmd>` —— login shell，覆盖 ~/.nvm/ 等路径
- *   2. `zsh -lc command -v <cmd>`  —— macOS 默认 shell fallback
- *   3. `which <cmd>` —— 最终 fallback，使用 process.env.PATH 直接查找
+ * POSIX strategy chain. Each shell environment is tried in turn and the first
+ * path that resolves and exists wins:
+ *   1. `bash -lc command -v <cmd>` — login shell, covers ~/.nvm/ and friends
+ *   2. `zsh -lc command -v <cmd>`  — macOS default shell fallback
+ *   3. `which <cmd>`               — last resort, plain process.env.PATH lookup
  *
- * @param cmd  候选命令名
- * @returns    存在的绝对路径；三种策略都失败时返回 null
+ * @param cmd  command name
+ * @returns    existing absolute path; null when all three strategies fail
  */
 function whichOnPosix(cmd: string): string | null {
-  // 策略 1：bash login shell（shell: false 是 execFileSync 默认行为，此处显式标注）
+  // Strategy 1: bash login shell (shell: false is the execFileSync default; stated explicitly).
   try {
     const p = execFileSync('bash', ['-lc', `command -v ${cmd}`], {
       encoding: 'utf8',
@@ -87,10 +112,10 @@ function whichOnPosix(cmd: string): string | null {
     }).trim();
     if (p && existsSync(p)) return p;
   } catch {
-    // 继续尝试下一策略
+    // fall through to the next strategy
   }
 
-  // 策略 2：zsh login shell（macOS 默认 shell / bash 不可用时）
+  // Strategy 2: zsh login shell (macOS default, or when bash is unavailable).
   try {
     const p = execFileSync('zsh', ['-lc', `command -v ${cmd}`], {
       encoding: 'utf8',
@@ -100,10 +125,10 @@ function whichOnPosix(cmd: string): string | null {
     }).trim();
     if (p && existsSync(p)) return p;
   } catch {
-    // 继续尝试下一策略
+    // fall through to the next strategy
   }
 
-  // 策略 3：which 命令（使用 process.env.PATH，覆盖 fish / CI 容器等环境）
+  // Strategy 3: `which` against process.env.PATH (fish, CI containers, ...).
   try {
     const p = execFileSync('which', [cmd], {
       encoding: 'utf8',
@@ -113,30 +138,42 @@ function whichOnPosix(cmd: string): string | null {
     }).trim();
     if (p && existsSync(p)) return p;
   } catch {
-    // 三种策略都不可用
+    // none of the strategies worked
   }
 
   return null;
 }
 
 /**
- * 把候选 CLI 命令名解析为存在的绝对路径。
+ * Resolve a CLI command name to an existing absolute path.
  *
- * Windows 上必须走 `where`：`bash` / `which` 在 Windows 上来自 Git Bash 或 WSL，
- * 返回的是 MSYS 风格路径（如 `/c/Users/me/AppData/Roaming/npm/claude`），
- * Node 对这类路径 `existsSync` 恒为 false，spawn 也无法启动，所以 POSIX 策略在
- * Windows 上永远不可能成功（WSL 的 bash 更会返回完全不可用的 Linux 路径）。
+ * Windows must go through `where`: `bash` / `which` there come from Git Bash
+ * or WSL and print MSYS-style paths (`/c/Users/me/AppData/Roaming/npm/claude`)
+ * for which `existsSync` is always false and spawn cannot start anything, so
+ * the POSIX strategies can never succeed on Windows (WSL's bash would even
+ * return an unusable Linux path).
  *
- * `platform` 之所以可注入，是因为仓库 CI 只跑 ubuntu / macos：写死 process.platform
- * 的话 Windows 分支将没有任何测试覆盖（这正是该缺陷长期未被发现的原因）。
+ * `platform` is injectable because CI only runs on ubuntu / macos: with
+ * process.platform hard-coded the Windows branch would have no test coverage,
+ * which is exactly why the original bug went unnoticed for so long.
  *
- * @param cmd       候选命令名
- * @param platform  目标平台，默认当前进程平台
- * @returns         存在的绝对路径；该平台上不可用时返回 null
+ * Results are memoised per process; see `resetCliPathCache()`.
+ *
+ * @param cmd       command name (plain name only, no path or shell syntax)
+ * @param platform  target platform, defaults to the current process platform
+ * @returns         existing absolute path; null when unavailable on that platform
  */
 export function resolveCliPath(
   cmd: string,
   platform: NodeJS.Platform = process.platform,
 ): string | null {
-  return platform === 'win32' ? whereOnWindows(cmd) : whichOnPosix(cmd);
+  if (!SAFE_COMMAND_NAME.test(cmd)) return null;
+
+  const key = `${platform}:${cmd}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) return hit;
+
+  const resolved = platform === 'win32' ? whereOnWindows(cmd) : whichOnPosix(cmd);
+  cache.set(key, resolved);
+  return resolved;
 }

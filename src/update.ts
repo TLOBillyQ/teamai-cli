@@ -67,9 +67,11 @@ export function resolveNpmCommand(): { cmd: string; args: string[] } {
     path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
     // POSIX layout rooted at the node dir itself.
     path.join(nodeDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    // Canonical POSIX install (official tarball, Homebrew, nvm): node lives in
+    // Canonical POSIX install (official tarball, nvm): node lives in
     // <prefix>/bin with npm at <prefix>/lib/node_modules — one level up.
     path.join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    // Homebrew keg: node at <keg>/bin/node, npm under <keg>/libexec/lib/node_modules.
+    path.join(nodeDir, '..', 'libexec', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return { cmd: process.execPath, args: [c] };
@@ -91,7 +93,11 @@ export function prefixFromEntryPath(entry: string, posix: boolean): string | nul
   const idx = entry.lastIndexOf(marker);
   if (idx <= 0) return null;
   const root = entry.slice(0, idx);
-  const prefix = posix && path.basename(root) === 'lib' ? path.dirname(root) : root;
+  // POSIX global installs always sit under <prefix>/lib/node_modules. Any other
+  // root (npx cache, pnpm store, project-local node_modules) is not a global
+  // prefix npm could reinstall into, so bail out instead of guessing.
+  if (posix && path.basename(root) !== 'lib') return null;
+  const prefix = posix ? path.dirname(root) : root;
   // Sanity-check the slice: only trust it when the running package actually
   // sits in the npm-managed layout under the prefix we would hand back.
   const nmDir = posix ? path.join('lib', 'node_modules') : 'node_modules';

@@ -813,14 +813,22 @@ describe('resolveNpmCommand', () => {
   });
 
   it('resolves npm one level up from bin (canonical POSIX prefix layout)', () => {
-    // Official tarball / Homebrew / nvm: <prefix>/bin/node + <prefix>/lib/node_modules/npm.
+    // Official tarball / nvm: <prefix>/bin/node + <prefix>/lib/node_modules/npm.
     restoreExecPath = stubExecPath(path.join('/usr', 'local', 'bin', 'node'));
     const npmCli = path.join('/usr', 'local', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-    // Candidate paths contain a literal '..' (path.join does not normalize) —
-    // compare resolved forms, like the real filesystem would.
     existsSpy.mockImplementation((p) => path.resolve(String(p)) === path.resolve(npmCli));
 
     expect(resolveNpmCommand()).toEqual({ cmd: path.join('/usr', 'local', 'bin', 'node'), args: [npmCli] });
+  });
+
+  it('resolves npm from the Homebrew keg libexec layout', () => {
+    // Homebrew: <keg>/bin/node + <keg>/libexec/lib/node_modules/npm.
+    const keg = path.join('/opt', 'homebrew', 'Cellar', 'node', '26.8.2');
+    restoreExecPath = stubExecPath(path.join(keg, 'bin', 'node'));
+    const npmCli = path.join(keg, 'libexec', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    existsSpy.mockImplementation((p) => path.resolve(String(p)) === path.resolve(npmCli));
+
+    expect(resolveNpmCommand()).toEqual({ cmd: path.join(keg, 'bin', 'node'), args: [npmCli] });
   });
 
   it('falls back to npm from PATH when no co-located npm-cli.js exists', () => {
@@ -860,11 +868,11 @@ describe('prefixFromEntryPath', () => {
     expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', 'teamai-cli'));
   });
 
-  it('keeps non-lib roots on POSIX (project-local installs)', () => {
+  it('returns null for non-lib roots on POSIX (npx cache, pnpm store, project-local installs)', () => {
     const entry = path.join('/home', 'u', 'proj', 'node_modules', 'teamai-cli', 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
-    expect(prefixFromEntryPath(entry, true)).toBe(path.join('/home', 'u', 'proj'));
+    expect(prefixFromEntryPath(entry, true)).toBeNull();
   });
 
   it('returns null for paths outside an npm-managed layout', () => {

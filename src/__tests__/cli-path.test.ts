@@ -36,7 +36,7 @@ vi.mock('../utils/logger.js', () => ({
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import crossSpawn from 'cross-spawn';
-import { pickWindowsCommand, resolveCliPath } from '../utils/cli-path.js';
+import { pickWindowsCommand, resolveCliPath, resetCliPathCache } from '../utils/cli-path.js';
 import { ghExec, isGhInstalled } from '../providers/github/gh-cli.js';
 import { cnbExec, isCnbInstalled } from '../providers/cnb/cnb-cli.js';
 
@@ -58,6 +58,7 @@ const CNB_SHIM = 'C:\\Users\\me\\AppData\\Roaming\\npm\\cnb.cmd';
 describe('resolveCliPath', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCliPathCache();
     mockedExistsSync.mockReturnValue(true);
   });
 
@@ -100,6 +101,7 @@ describe('resolveCliPath', () => {
 describe('gh-cli launches the resolved executable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCliPathCache();
     mockedExistsSync.mockReturnValue(true);
     mockedSpawnSync.mockReturnValue({ status: 0, stdout: 'gh version 2.0.0\n', stderr: '' });
   });
@@ -114,6 +116,8 @@ describe('gh-cli launches the resolved executable', () => {
     mockedExecFileSync.mockImplementation(() => { throw new Error('missing'); });
     expect(isGhInstalled()).toBe(false);
 
+    // Lookups are memoised per process; a fresh install has to clear the miss.
+    resetCliPathCache();
     mockedExecFileSync.mockReturnValue(`${GH_EXE}\r\n`);
     expect(isGhInstalled()).toBe(true);
   });
@@ -122,6 +126,7 @@ describe('gh-cli launches the resolved executable', () => {
 describe('cnb-cli launches the resolved executable', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCliPathCache();
     mockedExistsSync.mockReturnValue(true);
     mockedCrossSpawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
   });
@@ -152,7 +157,41 @@ describe('cnb-cli launches the resolved executable', () => {
     mockedExecFileSync.mockImplementation(() => { throw new Error('missing'); });
     expect(isCnbInstalled()).toBe(false);
 
+    resetCliPathCache();
     mockedExecFileSync.mockReturnValue(`${CNB_SHIM}\r\n`);
     expect(isCnbInstalled()).toBe(true);
+  });
+});
+
+describe('resolveCliPath cache', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetCliPathCache();
+    mockedExistsSync.mockReturnValue(true);
+  });
+
+  it('probes once per command and platform, then serves the memoised result', () => {
+    mockedExecFileSync.mockReturnValue('/opt/homebrew/bin/gh\n');
+    expect(resolveCliPath('gh', 'darwin')).toBe('/opt/homebrew/bin/gh');
+    expect(resolveCliPath('gh', 'darwin')).toBe('/opt/homebrew/bin/gh');
+    expect(mockedExecFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('memoises a miss until the cache is reset', () => {
+    mockedExecFileSync.mockImplementation(() => { throw new Error('missing'); });
+    expect(resolveCliPath('cnb', 'linux')).toBeNull();
+    const probesForMiss = mockedExecFileSync.mock.calls.length;
+    expect(resolveCliPath('cnb', 'linux')).toBeNull();
+    expect(mockedExecFileSync).toHaveBeenCalledTimes(probesForMiss);
+
+    resetCliPathCache();
+    mockedExecFileSync.mockReturnValue('/usr/local/bin/cnb\n');
+    expect(resolveCliPath('cnb', 'linux')).toBe('/usr/local/bin/cnb');
+  });
+
+  it('rejects names that are not plain commands without spawning anything', () => {
+    expect(resolveCliPath('gh; rm -rf /', 'linux')).toBeNull();
+    expect(resolveCliPath('../gh', 'win32')).toBeNull();
+    expect(mockedExecFileSync).not.toHaveBeenCalled();
   });
 });

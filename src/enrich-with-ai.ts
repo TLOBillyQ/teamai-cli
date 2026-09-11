@@ -119,12 +119,19 @@ function resolveImportToModule(importerFile: string, importPath: string): string
   return first;
 }
 
-/** Group non-relation facts by top-level directory (same buckets as AI enrich). */
+/**
+ * Group non-relation facts by top-level directory (same buckets as AI enrich).
+ *
+ * Root-level files land in `_root`, matching `buildModuleSummaries` in
+ * codebase-extract so the manifest slugs line up with the module docs that
+ * deep-enrich reads.
+ */
 export function groupFactsByModule(facts: CodeFact[]): Map<string, CodeFact[]> {
   const modules = new Map<string, CodeFact[]>();
   for (const fact of facts) {
     if (fact.kind === 'relation') continue;
-    const mod = fact.file.split('/')[0] || '_root';
+    const parts = fact.file.split('/');
+    const mod = parts.length > 1 ? parts[0] : '_root';
     const existing = modules.get(mod) ?? [];
     existing.push(fact);
     modules.set(mod, existing);
@@ -186,10 +193,16 @@ export function buildFallbackManifest(ctx: {
   };
 }
 
-export function describeEvidenceManifest(source: 'ai' | 'fallback' | 'none', componentCount: number): string | undefined {
+export type EvidenceManifestSource = 'ai' | 'fallback' | 'kept' | 'none';
+
+export function describeEvidenceManifest(source: EvidenceManifestSource, componentCount: number): string | undefined {
   if (source === 'fallback') {
     const noun = componentCount === 1 ? 'component' : 'components';
     return `Wrote fallback _manifest.json (${componentCount} ${noun}, no AI enrich)`;
+  }
+  if (source === 'kept') {
+    const noun = componentCount === 1 ? 'component' : 'components';
+    return `Kept existing _manifest.json (${componentCount} ${noun}; AI enrich produced nothing this run)`;
   }
   if (source === 'none') {
     return 'AI enrich produced no manifest; deep-enrich will have no components';

@@ -140,10 +140,12 @@ export async function resolveActiveProjects(
   repoPath: string,
   projectFlag?: string,
 ): Promise<Pick<LocalConfig, 'projects'>> {
-  const requested = (projectFlag ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const requested = [...new Set(
+    (projectFlag ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  )];
 
   if (requested.length === 0) {
     return { projects: [] };

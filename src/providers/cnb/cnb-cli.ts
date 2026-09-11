@@ -1,7 +1,7 @@
 import { execSync, spawnSync } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
 import { log, spinner } from '../../utils/logger.js';
-import { resolveCliPath } from '../../utils/cli-path.js';
+import { resolveCliPath, resetCliPathCache } from '../../utils/cli-path.js';
 import type { RepoInfo } from '../types.js';
 
 /**
@@ -103,6 +103,8 @@ export async function ensureCnbInstalled(): Promise<void> {
   const spin = spinner('Installing cnb CLI (@cnbcool/cnb-cli)...').start();
   try {
     execSync('npm install -g @cnbcool/cnb-cli', { stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 });
+    // The earlier miss is memoised; drop it so the re-probe sees the new binary.
+    resetCliPathCache();
     if (!isCnbInstalled()) throw new Error('cnb not found on PATH after install');
     spin.succeed('cnb CLI installed');
   } catch (e) {

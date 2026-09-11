@@ -39,6 +39,21 @@ import { writeIfChanged } from './utils/fs.js';
 import type { GraphIndex } from './wiki-engine/core/graph-index.schema.js';
 import { routerTemplate, indexTemplate, HOT_TEMPLATE } from './wiki-engine/adapters/templates.js';
 import type { DomainGroup, IndexStats } from './wiki-engine/adapters/templates.js';
+import type { EvidenceManifestSource } from './enrich-with-ai.js';
+
+/**
+ * Component count of an already-written `_manifest.json`, or null when the
+ * file is missing or unreadable. Used to keep a prior (richer) manifest
+ * instead of overwriting it with the deterministic fallback.
+ */
+async function readExistingManifestComponentCount(manifestPath: string): Promise<number | null> {
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf-8')) as { components?: unknown };
+    return Array.isArray(parsed.components) ? parsed.components.length : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ExtractCodebaseOptions {
   path?: string;
@@ -66,7 +81,7 @@ interface ExtractResult {
   outputDir: string;
   manifest: {
     written: boolean;
-    source: 'ai' | 'fallback' | 'none';
+    source: EvidenceManifestSource;
     components: number;
     note?: string;
   };
@@ -720,7 +735,7 @@ export async function extractCodebase(opts: ExtractCodebaseOptions): Promise<voi
   // When enrich yields nothing, still write a deterministic _manifest.json so
   // deep-enrich has components to work with (#508).
   let aiDomains: DomainGroup[] = [];
-  let manifestSource: 'ai' | 'fallback' | 'none' = 'none';
+  let manifestSource: EvidenceManifestSource = 'none';
   let manifestComponentCount = 0;
   const {
     enrichWithAI,
@@ -729,6 +744,7 @@ export async function extractCodebase(opts: ExtractCodebaseOptions): Promise<voi
     groupFactsByModule,
     describeEvidenceManifest,
   } = await import('./enrich-with-ai.js');
+  const evidenceManifestPath = path.join(evidenceDir, '_manifest.json');
   const modules = groupFactsByModule(facts);
 
   if (opts.skipEnrich) {
@@ -762,11 +778,20 @@ export async function extractCodebase(opts: ExtractCodebaseOptions): Promise<voi
   }
 
   if (manifestSource === 'none') {
-    const fallback = buildFallbackManifest({ project, facts, modules });
-    if (fallback && fallback.components.length > 0) {
-      await writeManifest(fallback, evidenceDir);
-      manifestSource = 'fallback';
-      manifestComponentCount = fallback.components.length;
+    // An earlier run (typically an AI-enriched one) may already have written a
+    // richer manifest; an incremental refresh whose AI step fails must not
+    // downgrade it to the deterministic stub.
+    const existing = await readExistingManifestComponentCount(evidenceManifestPath);
+    if (existing !== null) {
+      manifestSource = 'kept';
+      manifestComponentCount = existing;
+    } else {
+      const fallback = buildFallbackManifest({ project, facts, modules });
+      if (fallback && fallback.components.length > 0) {
+        await writeManifest(fallback, evidenceDir);
+        manifestSource = 'fallback';
+        manifestComponentCount = fallback.components.length;
+      }
     }
   }
 
@@ -911,7 +936,7 @@ export async function extractCodebase(opts: ExtractCodebaseOptions): Promise<voi
     incremental: !!opts.incremental && !!changedFiles,
     outputDir: wikiRoot,
     manifest: {
-      written: manifestSource !== 'none',
+      written: manifestSource === 'ai' || manifestSource === 'fallback',
       source: manifestSource,
       components: manifestComponentCount,
       ...(manifestNote ? { note: manifestNote } : {}),

@@ -8,11 +8,11 @@ const ALLOWED_CLI_CANDIDATES = [
 ] as const;
 
 /**
- * 命令探测（`resolveCliPath` / `pickWindowsCommand`）已抽到 `utils/cli-path.ts`，
- * provider 的 CLI 包装层（gh / cnb）与本文件共用同一套解析逻辑。
- * 这里保留再导出，既有 import 不受影响。
+ * Command lookup (`resolveCliPath` / `pickWindowsCommand`) lives in
+ * `utils/cli-path.ts` so the provider CLI wrappers (gh / cnb) share the same
+ * resolution logic. Re-exported here to keep existing imports working.
  */
-export { pickWindowsCommand, resolveCliPath } from './cli-path.js';
+export { pickWindowsCommand, resolveCliPath, resetCliPathCache } from './cli-path.js';
 
 /**
  * 默认 AI 调用超时时间（毫秒）。

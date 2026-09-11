@@ -238,7 +238,7 @@ teamai codebase --extract /path/to/repo     # local extract into teamwiki/
 teamai codebase --lint --output /path/to/repo # check the locally extracted graph
 ```
 
-Extract writes `teamwiki/evidence/code/<project>/_manifest.json` even when AI enrichment is skipped or produces nothing, so `--deep-enrich` can start.
+Extract writes `teamwiki/evidence/code/<project>/_manifest.json` even when AI enrichment is skipped or produces nothing, so `--deep-enrich` can start; an existing manifest is never overwritten by that fallback.
 
 The graph stores components, interfaces, configs, and cross-repo import edges. `teamai recall` uses it for graph-boosted re-ranking.
 When a recall hit comes from a codebase page, the result includes a `Sources:` line listing the relevant source file paths — giving agents a direct starting point for code changes instead of re-exploring the repo.

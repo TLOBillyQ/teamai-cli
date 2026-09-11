@@ -1120,7 +1120,7 @@ teamai codebase --extract /path/to/repo --project my-service --incremental
 teamai codebase --lint --output /path/to/repo
 ```
 
-只要 extract 发现了组件，就会写入 `teamwiki/evidence/code/<project>/_manifest.json`（包括跳过 AI 增强或增强没有产出的情况），因此 `--deep-enrich` 可以接着跑。
+只要 extract 发现了组件，就会写入 `teamwiki/evidence/code/<project>/_manifest.json`（包括跳过 AI 增强或增强没有产出的情况），因此 `--deep-enrich` 可以接着跑。如果之前已经有 manifest（例如早先一次 AI 增强成功的产物），后续没有产出的运行会原样保留它，回退 manifest 不会覆盖。
 
 ### Dashboard
 

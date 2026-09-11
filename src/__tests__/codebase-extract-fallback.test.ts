@@ -150,6 +150,38 @@ describe('extract writes a fallback evidence manifest (#508)', () => {
     }
   });
 
+  it('keeps an existing manifest instead of downgrading it to the fallback', async () => {
+    const root = createWidgetFixture();
+    const evidenceDir = path.join(root, 'teamwiki', 'evidence', 'code', 'widget');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const prior = {
+      schemaVersion: 'team-wiki.codebase-output-manifest.v2',
+      project: 'widget',
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      components: [
+        { slug: 'src', docPath: 'evidence/code/widget/src.md', title: 'src', category: 'service', confidence: 'INFERRED', responsibilities: ['from an earlier AI run'] },
+        { slug: 'extra', docPath: 'evidence/code/widget/extra.md', title: 'extra', category: 'service', confidence: 'INFERRED' },
+      ],
+      edges: [],
+    };
+    fs.writeFileSync(path.join(evidenceDir, '_manifest.json'), JSON.stringify(prior, null, 2));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await extractCodebase({ path: root, project: 'widget', json: true, skipEnrich: true });
+
+    const report = JSON.parse(String(log.mock.calls.at(-1)?.[0])) as {
+      manifest: { written: boolean; source: string; components: number; note?: string };
+    };
+    expect(report.manifest.written).toBe(false);
+    expect(report.manifest.source).toBe('kept');
+    expect(report.manifest.components).toBe(2);
+    expect(report.manifest.note).toMatch(/Kept existing _manifest\.json/);
+
+    const manifest = readEvidenceManifest(root, 'widget');
+    expect(manifest.components).toHaveLength(2);
+    expect(manifest.components[0]?.responsibilities).toEqual(['from an earlier AI run']);
+  });
+
   it('writes the same fallback when --skip-enrich is set', async () => {
     const root = createWidgetFixture();
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
