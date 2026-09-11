@@ -26,7 +26,7 @@ import {
   resolveHookScope,
   getDataHome,
   isRecallEnabled,
-  isAgentDisabled,
+  isAgentExcluded,
   scopedToolPaths,
   SYNC_LOCK_FILENAME,
 } from './types.js';
@@ -285,7 +285,7 @@ export async function cleanupInactiveNamespaceSkills(
   const baseDir = resolveBaseDir(localConfig);
 
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
-    if (isAgentDisabled(localConfig, tool)) continue;
+    if (isAgentExcluded(localConfig, tool)) continue;
     if (!toolPath.skills) continue;
     if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) continue;
     if (!await pathExists(path.join(baseDir, toolPath.skills))) continue;
@@ -456,6 +456,9 @@ async function reportSkippedTargets(
 /**
  * Return the installed tool targets that can receive team-owned resources.
  *
+ * Tools in `disabledAgents`, and tools outside `enabledAgents` when that
+ * whitelist is set, are omitted — the same gate resource handlers use.
+ *
  * The revision cache is shared by a scope, while tool roots can appear later
  * (for example, when Cursor creates `.cursor/` on its first launch). Persisting
  * this set alongside the revision prevents a pull for one tool from suppressing
@@ -469,7 +472,7 @@ async function getInstalledResourceTargets(
   const targets: string[] = [];
 
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
-    if (isAgentDisabled(localConfig, tool)) continue;
+    if (isAgentExcluded(localConfig, tool)) continue;
 
     const resourcePaths = resourceToolPaths(toolPath);
     for (const resourcePath of resourcePaths) {
@@ -769,7 +772,7 @@ async function pullForScope(
         const dir = toolPath[toolPathField];
         if (!dir) continue;
         if (!await ResourceHandler.isToolInstalled(dir, baseDir)) continue;
-        if (isAgentDisabled(localConfig, tool)) continue;
+        if (isAgentExcluded(localConfig, tool)) continue;
 
         // Rules carry a per-tool extension (`.mdc` for compatible tools), and those dirs
         // may still hold a `.md` copy from the layout that predates it, so a
@@ -805,7 +808,7 @@ async function pullForScope(
     const baseDir = resolveBaseDir(localConfig);
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
-      if (isAgentDisabled(localConfig, tool)) continue;
+      if (isAgentExcluded(localConfig, tool)) continue;
       if (!toolPath.skills) continue;
       if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) continue;
       const skillsDir = path.join(baseDir, toolPath.skills);
@@ -981,7 +984,7 @@ async function pullForScope(
           if (compiled) {
             const baseDir = resolveBaseDir(localConfig);
             for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
-              if (isAgentDisabled(localConfig, tool)) continue;
+              if (isAgentExcluded(localConfig, tool)) continue;
               if (!toolPath.claudemd) continue;
               const installRoot = instructionInstallRoot(tool, toolPath);
               if (installRoot && !await ResourceHandler.isToolInstalled(installRoot, baseDir)) continue;
@@ -1013,7 +1016,7 @@ async function pullForScope(
         if (compiled) {
           const baseDir = resolveBaseDir(localConfig);
           for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
-            if (isAgentDisabled(localConfig, tool)) continue;
+            if (isAgentExcluded(localConfig, tool)) continue;
             if (!toolPath.claudemd) continue;
             const installRoot = instructionInstallRoot(tool, toolPath);
             if (installRoot && !await ResourceHandler.isToolInstalled(installRoot, baseDir)) continue;
@@ -1266,7 +1269,7 @@ export async function injectRecallBlockIntoTools(
         const recallBlock = compileRecallRulesBlock();
         let injected = 0;
         for (const [tool, toolPath] of Object.entries(scopedToolPaths(config, localConfig))) {
-            if (isAgentDisabled(localConfig, tool)) continue;
+            if (isAgentExcluded(localConfig, tool)) continue;
             if (!toolPath.claudemd || !toolPath.agents) continue;
             if (!await ResourceHandler.isToolInstalled(toolPath.agents, baseDir)) continue;
 
