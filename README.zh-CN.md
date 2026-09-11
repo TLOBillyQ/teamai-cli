@@ -30,7 +30,7 @@ npm i -g @agent/teamai-cli
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/yourorg/yourrepo`。
+在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init http://lzxsvn:3000/agent/yourrepo`。
 
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Use this template** 生成自己的仓库，再对它执行 `teamai init`。
 
@@ -41,10 +41,10 @@ npm i -g @agent/teamai-cli
 
 # 项目级初始化（默认，资源安装到项目目录下）
 cd /path/to/my-project
-teamai init https://github.com/yourorg/yourrepo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
 # 或者，用户级初始化（资源安装到 ~/ 下）
-teamai init https://github.com/yourorg/yourrepo --scope user
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 初始化完成后，每次开启 AI 会话时都会自动拉取管理员发布的 skills / rules 等 Harness 更新，无需手动同步。

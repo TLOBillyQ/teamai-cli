@@ -25,6 +25,8 @@ const execFileAsync = promisify(execFile);
 const PUBLIC_REGISTRY = 'https://registry.npmjs.org';
 /** Tencent internal tnpm registry (for @tencent/ scoped package). */
 const TNPM_REGISTRY = 'http://r.tnpm.oa.com';
+/** Self-hosted Gitea package registry (for the @agent/ scoped build). */
+const AGENT_REGISTRY = 'http://lzxsvn:3000/api/packages/agent/npm/';
 
 const VERSION_CHECK_TIMEOUT = 5000;
 const INSTALL_TIMEOUT = 60000;
@@ -34,7 +36,8 @@ const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 /**
  * Resolve the npm registry to use for the given package name.
- * Scoped packages under `@tencent/` go to tnpm; everything else to public npm.
+ * Scoped packages under `@tencent/` go to tnpm, `@agent/` to the self-hosted
+ * Gitea registry; everything else to public npm.
  * Honor `TEAMAI_NPM_REGISTRY` env var for manual override (useful for testing
  * or private mirrors).
  */
@@ -42,6 +45,7 @@ export function resolveRegistryForPackage(pkgName: string): string {
   const override = process.env.TEAMAI_NPM_REGISTRY?.trim();
   if (override) return override;
   if (pkgName.startsWith('@tencent/')) return TNPM_REGISTRY;
+  if (pkgName.startsWith('@agent/')) return AGENT_REGISTRY;
   return PUBLIC_REGISTRY;
 }
 

@@ -30,7 +30,7 @@ Upstream releases are on public npm as `npm install -g teamai-cli`, but they do 
 
 ### Team admin / solo user
 
-Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/yourorg/yourrepo`.
+Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init http://lzxsvn:3000/agent/yourrepo`.
 
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Use this template**, then `teamai init` against your new repo.
 
@@ -41,10 +41,10 @@ Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, 
 
 # Project-scope init (default, resources installed under the project directory)
 cd /path/to/my-project
-teamai init https://github.com/yourorg/yourrepo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
 # Or, user-scope init (resources installed under ~/)
-teamai init https://github.com/yourorg/yourrepo --scope user
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 Once initialized, every AI session automatically pulls the latest skills / rules and other Harness updates published by admins — no manual sync needed.

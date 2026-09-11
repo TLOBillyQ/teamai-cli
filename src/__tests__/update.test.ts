@@ -79,6 +79,7 @@ import {
   checkForUpdate,
   doUpdate,
   update,
+  resolveRegistryForPackage,
 } from '../update.js';
 
 // ─── Typed mock references ──────────────────────────────
@@ -136,6 +137,24 @@ beforeEach(() => {
 });
 
 // ─── Unit tests: compareVersions ────────────────────────
+
+describe('resolveRegistryForPackage', () => {
+  it('routes each scope to its own registry', () => {
+    expect(resolveRegistryForPackage('teamai-cli')).toBe('https://registry.npmjs.org');
+    expect(resolveRegistryForPackage('@tencent/teamai-cli')).toBe('http://r.tnpm.oa.com');
+    expect(resolveRegistryForPackage('@agent/teamai-cli'))
+      .toBe('http://lzxsvn:3000/api/packages/agent/npm/');
+  });
+
+  it('lets TEAMAI_NPM_REGISTRY override every scope', () => {
+    process.env.TEAMAI_NPM_REGISTRY = 'http://mirror.internal/npm/';
+    try {
+      expect(resolveRegistryForPackage('@agent/teamai-cli')).toBe('http://mirror.internal/npm/');
+    } finally {
+      delete process.env.TEAMAI_NPM_REGISTRY;
+    }
+  });
+});
 
 describe('compareVersions', () => {
   it('should return 0 for equal versions', () => {

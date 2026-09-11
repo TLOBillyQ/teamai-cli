@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file. See [standa
 - Multi-project management: `role` and `project` together resolve resource namespaces, and project-private learnings are isolated ([#426](https://github.com/Tencent/teamai-cli/pull/426), for [#375](https://github.com/Tencent/teamai-cli/issues/375)).
 - Data partitions auto-migrate a legacy `.teamai`, resume interrupted migrations, smoke-check the clone, and keep a git-ignored backup ([#439](https://github.com/Tencent/teamai-cli/pull/439), for [#374](https://github.com/Tencent/teamai-cli/issues/374)).
 - Kimi Code CLI hook support: `teamai pull` / `hooks inject` merge the six built-in hooks as `[[hooks]]` entries into the user-level `~/.kimi-code/config.toml` (idempotent, user entries preserved), `teamai uninstall` removes exactly the teamai entries, and hook dispatch maps kimi's `TodoList` tool and Stop protocol (for #5).
+- Kimi Code CLI is a first-class target: `--agent kimi` and HOME detection cover it, skills and subagents land in `.kimi-code/` (tool names mapped to Kimi ids), and team rules are inlined into a managed block of `.kimi-code/AGENTS.md` because Kimi has no rules directory (#10, for #8).
 
 ### 🐛 Bug Fixes
 
