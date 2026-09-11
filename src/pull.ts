@@ -9,7 +9,7 @@ import { pathExists, remove, listFiles, listDirs, listFilesRecursive, readFileSa
 import { injectClaudeMdSection } from './utils/claudemd.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
 import { ResourceHandler, toolInstallRoot } from './resources/base.js';
-import { ruleFileExtensionForTool } from './resources/rule-format.js';
+import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
 import { loadTagsConfig, filterByTags } from './utils/tags.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, TagsConfig } from './types.js';
@@ -956,7 +956,8 @@ async function pullForScope(
             for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
               if (isAgentDisabled(localConfig, tool)) continue;
               if (!toolPath.claudemd) continue;
-              if (toolPath.rules && !await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) continue;
+              const installRoot = instructionInstallRoot(tool, toolPath);
+              if (installRoot && !await ResourceHandler.isToolInstalled(installRoot, baseDir)) continue;
 
               const claudeMdPath = path.join(baseDir, toolPath.claudemd);
               try {
@@ -987,7 +988,8 @@ async function pullForScope(
           for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
             if (isAgentDisabled(localConfig, tool)) continue;
             if (!toolPath.claudemd) continue;
-            if (toolPath.rules && !await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) continue;
+            const installRoot = instructionInstallRoot(tool, toolPath);
+            if (installRoot && !await ResourceHandler.isToolInstalled(installRoot, baseDir)) continue;
             const claudeMdPath = path.join(baseDir, toolPath.claudemd);
             try {
               await injectClaudeMdSection(claudeMdPath, TEAMAI_CLAUDEMD_START, TEAMAI_CLAUDEMD_END, compiled);

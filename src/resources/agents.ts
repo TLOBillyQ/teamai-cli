@@ -17,6 +17,7 @@ import {
   reverseFromCursor,
   reverseFromJoycode,
   reverseFromOpencode,
+  reverseFromKimi,
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
 } from './agent-format.js';
@@ -587,5 +588,7 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromClaude(filePath, content);
     case 'opencode':
       return reverseFromOpencode(filePath, content);
+    case 'kimi':
+      return reverseFromKimi(filePath, content);
   }
 }

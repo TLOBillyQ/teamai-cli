@@ -262,7 +262,7 @@ teamai init . --agent claude,codex   # 非交互：启用 Claude Code + Codex
 
 **选择启用哪些 AI 工具。** 单仓模式会在你的仓库里为每个工具创建一个目录（如 `.claude/`、`.codex/`）——建好 skills 目录、注入 teamai hooks，并把该工具的 settings 提交到 main，让队友 clone 后即可获得。由你决定启用哪些工具：
 
-- **`--agent <name...>`** —— 显式列表，可重复或逗号分隔：`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。常用 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`dsh`（DeepSeek Harness）。
+- **`--agent <name...>`** —— 显式列表，可重复或逗号分隔：`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。常用 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`kimi`（Kimi Code CLI）、`dsh`（DeepSeek Harness）。
 - **交互式（无 `--agent`、有终端）** —— teamai 弹出多选列表。第 1 项是 **Auto**，会列出你本机已安装的 AI 工具（`~/.claude`、`~/.codex`……）并作为回车默认项；其余各项是具体工具。Auto 与具体工具可以组合勾选。
 - **非交互（无 `--agent`、无终端 —— CI、hook、clone 时自愈 bootstrap）** —— teamai 会按你本机 home 目录下已装的工具（`~/.claude`、`~/.codex`……）来建。若一个都没检测到，则什么都不建（你仍拿到知识，可稍后运行 `teamai init .` 再选工具）。
 
@@ -373,7 +373,7 @@ teamai skill show hai-deploy-test   # 看单个 skill 的来源 / 贡献者 / �
 
 `teamai init` 时已注入 Hooks 到你的 AI 工具中。**每次启动 AI 会话时会自动执行 `teamai pull`**，无需手动操作。在 project scope 下，该 SessionStart hook 会先为当前 Agent 创建项目根目录（例如用 Claude Code 打开仓库时创建 `<project>/.claude`），然后再 pull。
 
-*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 Claude Code、Codex、Cursor、CodeBuddy、WorkBuddy、Qoder、OpenCode、Hermes、OpenClaw 等。对于暂无 Hooks 支持的工具（如 JoyCode、Gemini CLI 等），无法触发会话启动 Hook，需在终端手动执行 `teamai pull` 同步团队资源。)*
+*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 Claude Code、Codex、Cursor、CodeBuddy、WorkBuddy、Qoder、OpenCode、Hermes、Kimi Code CLI、OpenClaw 等。Kimi Code CLI 的 Hooks 始终以 `[[hooks]]` 条目写入其用户级 `~/.kimi-code/config.toml`（或 `$KIMI_CODE_HOME/config.toml`），project scope 也不例外，因为其项目级 `local.toml` 不支持 hooks。对于暂无 Hooks 支持的工具（如 JoyCode、Gemini CLI 等），无法触发会话启动 Hook，需在终端手动执行 `teamai pull` 同步团队资源。)*
 
 如果需要立即同步，可以手动执行：
 
@@ -1245,6 +1245,16 @@ team-repo/
 - **Rules** 会被复制到 `.opencode/rules/`（或 `~/.config/opencode/rules/`），但 OpenCode 不会自动扫描 rules 目录——文件在被引用前是惰性的。因此 teamai 会往 `opencode.json` 的 `instructions` 数组里加一条 `rules/*.md` glob，并在团队最后一条 rule 消失时再把它移除，且只编辑这一个键、不动你自己的 `instructions` 条目。
 - **Hooks** 以 OpenCode *plugin* 形式交付，而非配置文件条目——OpenCode 没有 `hooks` 数组，它会**同时**加载 `~/.config/opencode/plugin/` 和 `<project>/.opencode/plugin/` 下的 JS/TS 插件。两个目录都有插件时会被加载两次，每个事件也就派发两次，因此 teamai 只保留一份：写在用户目录的 `teamai-hooks.ts`，覆盖所有项目；早期布局残留的项目级副本会在下次同步时被删除。这与其他工具一致——它们的 `settings.json` hooks 同样放在 HOME，靠传给 `hook-dispatch` 的 `cwd` 做作用域判断。插件订阅 OpenCode 自己的事件，并 shell 到其他所有工具共用的 `teamai hook-dispatch` 入口。事件映射对齐 Claude 内置集合：`session.created` → session-start、`session.idle` → stop、`chat.message` → prompt-submit、`tool.execute.after` → post-tool-use。插件会转发与其他工具一致的 STDIN 负载（`cwd`、`tool_name`、`tool_input`、`prompt`），并把 OpenCode 的小写工具 id（`skill`、`todowrite`）映射回 handler 注册表期望的 PascalCase matcher。OpenCode 无法把 hook 的 stdout 回注到会话，因此 hooks 只为副作用运行（状态上报 / 同步 / 更新）。注意 OpenCode 会 **await** 它的具名 hook（`chat.message`、`tool.execute.after`），所以这两个事件的派发会短暂等待 `teamai` 子进程后 agent 才继续；错误始终被吞掉，hook 永远不会让会话失败。服务端下发的 agent hook（`teamai-agent-<slug>.ts`）同样装在这个用户级 plugin 目录下。
 - **MCP** server 位于共享 `opencode.json` 的 `mcp` 键下（详见上文 MCP 章节）。
+
+### Kimi Code CLI
+
+Kimi Code CLI 是内置目标（`--agent kimi`），与其他工具一样通过 `~/.kimi-code` 探测。它的项目级目录会被原生扫描，但它**没有 rules 目录**，且不会展开 `AGENTS.md` 里的 `@file` 引用，因此 teamai 做了适配：
+
+- **Skills** 落在 `.kimi-code/skills/`（Kimi 直接扫描该目录，以及 `.agents/skills/`）。
+- **Subagents** 会渲染成 Kimi 自己的 frontmatter 格式写入 `.kimi-code/agents/*.md`：`name`、`description` 和 YAML 列表形式的 `tools` 允许列表。常见的 Claude 风格工具名（`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`WebFetch`、`WebSearch`、`Task`）会翻译成 Kimi 的 `module:ClassName` id（如 `kimi_cli.tools.shell:Shell`），其余原样保留。Kimi 没有 `model` 字段，因此不会输出；Kimi 独有字段（`whenToUse`、`disallowedTools`、`subagents`、`override`）经由 `tool_extras.kimi` 往返。
+- **Rules** 会被**内联**进 `.kimi-code/AGENTS.md` 的 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`），这是 Kimi 唯一会注入系统提示的文件。规则的 frontmatter（`paths:` 等）会被去掉，因此按路径限定的规则在 Kimi 里对所有任务生效；区块之外你自己的内容保持不变；团队最后一条 rule 消失时区块随之移除。不会往 `.kimi-code/rules/` 拷任何文件，因为 Kimi 永远不会读它。
+- **Culture、共享指令和 recall 区块**同样注入这份 `.kimi-code/AGENTS.md`（recall 区块与内置 `teamai-recall` 子代理仅在 recall 启用时注入，见 `teamai recall status`）。以上都只在该作用域存在 `.kimi-code/`（或你显式启用了 `kimi`）时发生——teamai 绝不会为不用 Kimi 的人创建它。
+- **Hooks** 写在用户级 `~/.kimi-code/config.toml`（见上文 hooks 说明）。
 
 ### Qoder
 

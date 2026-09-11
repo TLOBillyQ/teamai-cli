@@ -59,8 +59,13 @@ describe('detectHomeInstalledAgents', () => {
     await fse.ensureDir(path.join(home, '.codex'));
     await fse.ensureDir(path.join(home, '.claude'));
     const found = await detectHomeInstalledAgents();
-    // candidate order is claude, codex, cursor, joycode, codebuddy, workbuddy
+    // candidate order is claude, codex, cursor, joycode, codebuddy, workbuddy, kimi
     expect(found).toEqual(['claude', 'codex']);
+  });
+
+  it('detects Kimi Code CLI from its ~/.kimi-code home', async () => {
+    await fse.ensureDir(path.join(home, '.kimi-code'));
+    expect(await detectHomeInstalledAgents()).toEqual(['kimi']);
   });
 
   it('respects a custom candidate list', async () => {
@@ -69,8 +74,8 @@ describe('detectHomeInstalledAgents', () => {
     expect(await detectHomeInstalledAgents(['cursor'])).toEqual(['cursor']);
   });
 
-  it('SELF_MODE_AGENT_CHOICES includes JoyCode among the common coding agents', () => {
-    expect([...SELF_MODE_AGENT_CHOICES]).toEqual(['claude', 'codex', 'cursor', 'joycode', 'codebuddy', 'workbuddy']);
+  it('SELF_MODE_AGENT_CHOICES lists the common coding agents including JoyCode and Kimi', () => {
+    expect([...SELF_MODE_AGENT_CHOICES]).toEqual(['claude', 'codex', 'cursor', 'joycode', 'codebuddy', 'workbuddy', 'kimi']);
   });
 });
 
@@ -174,7 +179,7 @@ describe('resolveSelfModeSelection (interactive picker: option 1 = Auto)', () =>
   });
 
   it('"all" (every index incl. Auto) yields the full choice set once', () => {
-    const allIndices = [0, 1, 2, 3, 4, 5, 6]; // Auto + 6 tools
+    const allIndices = [0, 1, 2, 3, 4, 5, 6, 7]; // Auto + 7 tools
     expect(resolveSelfModeSelection(allIndices, detected)).toEqual([...SELF_MODE_AGENT_CHOICES]);
   });
 });

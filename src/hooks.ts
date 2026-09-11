@@ -883,6 +883,13 @@ export async function injectHooksToAllTools(toolPaths: Record<string, { settings
       } catch (e) {
         log.warn(`Failed to inject Hermes hook: ${(e as Error).message}`);
       }
+    } else if (tool === 'kimi') {
+      try {
+        const { getKimiHome, injectKimiHooks } = await import('./kimi-hooks.js');
+        if (await pathExists(getKimiHome())) await injectKimiHooks();
+      } catch (e) {
+        log.warn(`Failed to inject Kimi Code hooks: ${(e as Error).message}`);
+      }
     } else if (tool === 'opencode') {
       try {
         await reconcileOpencodePlugin(resolvedBaseDir);
@@ -899,9 +906,10 @@ export async function injectHooksToAllTools(toolPaths: Record<string, { settings
  * injection path used by `teamai pull` / `init` / `hooks inject`.
  *
  * `settingsOnly` restricts the pass to tools reconciled through their settings
- * file, skipping Hermes and OpenCode. Those two go through global adapters that
- * ignore `baseDir` — `removeHermesHooks()` takes none, and the OpenCode
- * adapter's removeAll branch always targets HOME — so a caller sweeping a
+ * file, skipping Hermes, Kimi Code and OpenCode. Those go through global
+ * adapters that ignore `baseDir` — `removeHermesHooks()` / `removeKimiHooks()`
+ * take none, and the OpenCode adapter's removeAll branch always targets HOME —
+ * so a caller sweeping a
  * secondary location (the legacy `<projectRoot>` copy) must opt out, or it
  * deletes the hooks the primary pass just installed.
  */
@@ -943,6 +951,24 @@ export async function reconcileHooksToAllTools(
         }
       } catch (e) {
         log.warn(`Failed to reconcile Hermes hooks: ${(e as Error).message}`);
+      }
+      continue;
+    }
+    // Kimi Code CLI keeps hooks as `[[hooks]]` tables in its user-level
+    // config.toml (project-level local.toml has no hooks support), so every
+    // scope installs there. Install when the kimi home exists; removeAll
+    // strips exactly the teamai entries.
+    if (tool === 'kimi') {
+      if (opts.settingsOnly) continue;
+      try {
+        const { getKimiHome, injectKimiHooks, removeKimiHooks } = await import('./kimi-hooks.js');
+        if (opts.removeAll) {
+          await removeKimiHooks();
+        } else if (await pathExists(getKimiHome())) {
+          await injectKimiHooks();
+        }
+      } catch (e) {
+        log.warn(`Failed to reconcile Kimi Code hooks: ${(e as Error).message}`);
       }
       continue;
     }

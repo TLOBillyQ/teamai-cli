@@ -86,6 +86,8 @@ interface RemovalPlan {
   includeShared: boolean;
   /** Whether this removal targets Hermes (clears its SOUL.md block + config.yaml hook). */
   hermesCleanup: boolean;
+  /** Kimi Code CLI user config.toml holding teamai `[[hooks]]` entries, when targeted and present. */
+  kimiConfigPath: string | null;
   /** Scope being uninstalled (issue #73: surfaced to the user). */
   scope: Scope;
 }
@@ -95,6 +97,8 @@ interface ToolResources {
   hookFiles: Array<{ path: string; tool: string; manifestPath: string }>;
   openclawHookDirs: Array<{ hooksDir: string; tool: string }>;
   opencodeHookScopes: Array<{ baseDir: string; scope: Scope }>;
+  /** Kimi Code CLI config.toml carrying teamai `[[hooks]]` entries (user-level, scope-independent). */
+  kimiConfigPath: string | null;
   claudeMdFiles: string[];
   skillDirs: string[];
   ruleFiles: string[];
@@ -106,6 +110,7 @@ function hasToolResources(r: ToolResources): boolean {
     r.hookFiles.length > 0 ||
     r.openclawHookDirs.length > 0 ||
     r.opencodeHookScopes.length > 0 ||
+    r.kimiConfigPath !== null ||
     r.claudeMdFiles.length > 0 ||
     r.skillDirs.length > 0 ||
     r.ruleFiles.length > 0 ||
@@ -225,12 +230,17 @@ async function discoverToolResources(
   scope: Scope,
 ): Promise<ToolResources> {
   const res: ToolResources = {
-    hookFiles: [], openclawHookDirs: [], opencodeHookScopes: [], claudeMdFiles: [],
-    skillDirs: [], ruleFiles: [], agentFiles: [],
+    hookFiles: [], openclawHookDirs: [], opencodeHookScopes: [], kimiConfigPath: null,
+    claudeMdFiles: [], skillDirs: [], ruleFiles: [], agentFiles: [],
   };
 
   // (a) Hooks — settings.json / hooks.json
-  if (tool === 'opencode') {
+  if (tool === 'kimi') {
+    // Kimi Code CLI keeps hooks in its user-level config.toml regardless of
+    // scope; list it only when teamai entries are actually present.
+    const { getKimiConfigPath, hasKimiTeamaiHooks } = await import('./kimi-hooks.js');
+    if (await hasKimiTeamaiHooks()) res.kimiConfigPath = getKimiConfigPath();
+  } else if (tool === 'opencode') {
     // OpenCode has no settings file; its teamai hooks are plugin .ts files under
     // <base>/.config/opencode/plugin (where teamai writes them) or
     // <base>/.opencode/plugin (a project-scope copy from an earlier layout).
@@ -440,6 +450,7 @@ async function buildRemovalPlan(
     teamaiHomeExists: includeShared && await pathExists(teamaiHome),
     includeShared,
     hermesCleanup: toolsToMerge.includes('hermes'),
+    kimiConfigPath: null,
     scope: localConfig.scope,
   };
 
@@ -450,6 +461,7 @@ async function buildRemovalPlan(
     plan.hookFiles.push(...res.hookFiles);
     plan.openclawHookDirs.push(...res.openclawHookDirs);
     plan.opencodeHookScopes.push(...res.opencodeHookScopes);
+    if (res.kimiConfigPath) plan.kimiConfigPath = res.kimiConfigPath;
     plan.claudeMdFiles.push(...res.claudeMdFiles);
     plan.skillDirs.push(...res.skillDirs);
     plan.ruleFiles.push(...res.ruleFiles);
@@ -510,6 +522,7 @@ function isPlanEmpty(plan: RemovalPlan): boolean {
     plan.hookFiles.length === 0 &&
     plan.openclawHookDirs.length === 0 &&
     plan.opencodeHookScopes.length === 0 &&
+    plan.kimiConfigPath === null &&
     plan.claudeMdFiles.length === 0 &&
     plan.skillDirs.length === 0 &&
     plan.ruleFiles.length === 0 &&
@@ -555,6 +568,12 @@ function printSummary(plan: RemovalPlan, agentFilter?: string): void {
       const configDir = scope === 'project' ? '.opencode' : path.join('.config', 'opencode');
       console.log(`     ${path.join(baseDir, configDir, 'plugin')}/teamai-*.ts`);
     }
+    console.log('');
+  }
+
+  if (plan.kimiConfigPath) {
+    console.log('   Kimi Code CLI Hooks (teamai [[hooks]] entries only):');
+    console.log(`     ${plan.kimiConfigPath}`);
     console.log('');
   }
 
@@ -666,6 +685,17 @@ async function executeRemoval(plan: RemovalPlan): Promise<void> {
       }
     } catch (e) {
       log.warn(`Failed to remove OpenCode hook (${scope} scope): ${(e as Error).message}`);
+    }
+  }
+
+  // (a2c) Kimi Code CLI: strip exactly the teamai `[[hooks]]` tables from the
+  // user-level config.toml, leaving user entries and the rest of the document.
+  if (plan.kimiConfigPath) {
+    try {
+      const { removeKimiHooks } = await import('./kimi-hooks.js');
+      await removeKimiHooks();
+    } catch (e) {
+      log.warn(`Failed to remove Kimi Code hooks from ${plan.kimiConfigPath}: ${(e as Error).message}`);
     }
   }
 

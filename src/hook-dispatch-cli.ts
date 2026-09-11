@@ -21,6 +21,7 @@ import { buildHandlerRegistry, filterHandlersForConfig } from './hook-handlers.j
 import { resolveHookCwd } from './utils/hook-cwd.js';
 import { log, setStderrOnly } from './utils/logger.js';
 import { deriveSessionId } from './utils/session-id.js';
+import { normalizeToolName } from './utils/tool-names.js';
 
 /**
  * Max time to wait for STDIN EOF before proceeding with whatever was received.
@@ -164,6 +165,10 @@ export async function hookDispatchCli(
   bgOnly = false,
 ): Promise<void> {
   setStderrOnly(true);
+  // Hosts register the matcher in their own tool vocabulary (kimi: `TodoList`)
+  // while the handler registry keys on Claude-style names (`TodoWrite`), so
+  // route on the normalized name. Idempotent for names already in CLI form.
+  matcher = normalizeToolName(matcher);
   try {
     const raw = await readStdin();
     const stdin = parseStdin(raw, event);

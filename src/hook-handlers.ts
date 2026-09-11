@@ -342,10 +342,11 @@ const votesSyncHandler: HookHandler = {
 
       if (recalled.length > 0 && declared.length === 0) {
         nudged = true;
-        // Cursor's followup_message forces another model turn. Cap it to one
-        // per session so a model that never emits the declaration cannot enter
-        // an unbounded Stop → follow-up loop.
-        if ((tool ?? '').toLowerCase() === 'cursor') {
+        // Cursor's followup_message and kimi's Stop deny decision both force
+        // another model turn. Cap it to one per session so a model that never
+        // emits the declaration cannot enter an unbounded Stop → follow-up loop.
+        const loweredTool = (tool ?? '').toLowerCase();
+        if (loweredTool === 'cursor' || loweredTool === 'kimi') {
           const { claimVotesNudge } = await import('./contribute-check.js');
           nudged = await claimVotesNudge(sessionId);
         }
