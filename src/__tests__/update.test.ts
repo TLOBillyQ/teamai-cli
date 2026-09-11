@@ -86,6 +86,7 @@ import {
   doUpdate,
   update,
   resolveRegistryForPackage,
+  getCurrentPackageName,
   resolveNpmCommand,
   prefixFromEntryPath,
 } from '../update.js';
@@ -840,6 +841,8 @@ describe('resolveNpmCommand', () => {
 });
 
 describe('prefixFromEntryPath', () => {
+  // The sanity check looks for the *running* package (scoped on this fork).
+  const pkgDir = path.join(...getCurrentPackageName().split('/'));
   let existsSpy: MockInstance<typeof fs.existsSync>;
 
   beforeEach(() => {
@@ -850,26 +853,26 @@ describe('prefixFromEntryPath', () => {
   });
 
   it('strips the POSIX lib/ nesting and hands npm the prefix it expects', () => {
-    const entry = path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, true)).toBe(path.join('/usr', 'local'));
     // The sanity check must look under <prefix>/lib/node_modules/<pkg>.
     expect(existsSpy).toHaveBeenCalledWith(
-      path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli'),
+      path.join('/usr', 'local', 'lib', 'node_modules', pkgDir),
     );
   });
 
   it('returns the slice before node_modules on Windows layouts', () => {
-    const entry = path.join('C:', 'tools', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('C:', 'tools', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, false)).toBe(path.join('C:', 'tools'));
-    expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', 'teamai-cli'));
+    expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', pkgDir));
   });
 
   it('returns null for non-lib roots on POSIX (npx cache, pnpm store, project-local installs)', () => {
-    const entry = path.join('/home', 'u', 'proj', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/home', 'u', 'proj', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, true)).toBeNull();
@@ -878,11 +881,11 @@ describe('prefixFromEntryPath', () => {
   it('returns null for paths outside an npm-managed layout', () => {
     existsSpy.mockReturnValue(true);
 
-    expect(prefixFromEntryPath('/home/u/dev/teamai-cli/dist/index.js', true)).toBeNull();
+    expect(prefixFromEntryPath(path.join('/home', 'u', 'dev', pkgDir, 'dist', 'index.js'), true)).toBeNull();
   });
 
   it('returns null when the package dir is not under the derived prefix', () => {
-    const entry = path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(false);
 
     expect(prefixFromEntryPath(entry, true)).toBeNull();

@@ -803,7 +803,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       localConfig,
       new Set(),
       new Set(['stale-skill']),
-      new Map([['stale-skill', source]]),
     );
 
     expect(await fse.pathExists(leftover)).toBe(true);

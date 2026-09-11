@@ -382,7 +382,7 @@ export class RulesHandler extends ResourceHandler {
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!inlinesRulesIntoInstructions(tool)) continue;
-      if (isAgentDisabled(localConfig, tool)) continue;
+      if (isAgentExcluded(localConfig, tool)) continue;
       if (!toolPath.claudemd) continue;
       if (!await ResourceHandler.isToolInstalled(toolPath.claudemd, baseDir)) continue;
 

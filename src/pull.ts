@@ -409,7 +409,7 @@ async function reportSkippedTargets(
   let installed = 0;
 
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
-    if (isAgentDisabled(localConfig, tool)) continue;
+    if (isAgentExcluded(localConfig, tool)) continue;
     if (tool === 'openclaw' || tool === 'hermes') continue;
 
     // Same any-of-three test getInstalledResourceTargets uses, so a tool this

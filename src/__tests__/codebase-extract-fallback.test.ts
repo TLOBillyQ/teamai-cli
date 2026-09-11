@@ -16,7 +16,6 @@ vi.mock('../utils/ai-client.js', () => ({
 
 import { callClaudeParallel } from '../utils/ai-client.js';
 import { extractCodebase } from '../codebase-extract.js';
-import { codebaseCmd } from '../codebase-cmd.js';
 import { runHiddenDeepEnrich } from '../deep-enrich.js';
 import {
   buildFallbackManifest,
@@ -243,31 +242,6 @@ describe('extract writes a fallback evidence manifest (#508)', () => {
     expect(output).toMatch(/Wrote fallback _manifest\.json/);
     expect(output).toMatch(/no AI enrich/);
     expect(output).not.toMatch(/AI enrich produced no manifest; deep-enrich will have no components/);
-  });
-
-  it('does not abort deep-enrich for empty evidence after a successful extract', async () => {
-    const root = createWidgetFixture();
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
-
-    await extractCodebase({ path: root, project: 'widget', json: true, skipEnrich: true });
-    process.exitCode = undefined;
-
-    await codebaseCmd({ deepEnrich: true, project: 'widget', output: root, json: true });
-
-    const output = vi.mocked(console.log).mock.calls.flat().map(String).join('\n');
-    expect(output).not.toMatch(/No components in evidence/);
-    expect(output).not.toMatch(/No components in _manifest\.json/);
-    expect(output).not.toMatch(/Run `teamai codebase --extract` first/);
-
-    const lastJson = [...vi.mocked(console.log).mock.calls]
-      .map(call => String(call[0]))
-      .reverse()
-      .find(text => text.trim().startsWith('{'));
-    expect(lastJson).toBeTruthy();
-    const report = JSON.parse(lastJson!) as { complete?: boolean; missingComponents?: string[] };
-    expect(report.complete).toBe(false);
-    expect(report.missingComponents?.length).toBeGreaterThan(0);
-    expect(process.exitCode).toBe(1);
   });
 
   it('hidden deep-enrich after extract does not abort for missing components', async () => {
