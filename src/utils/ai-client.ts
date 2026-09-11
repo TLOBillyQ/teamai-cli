@@ -1,14 +1,18 @@
-import { spawn, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import spawn from 'cross-spawn';
 import { log } from './logger.js';
+import { resolveCliPath } from './cli-path.js';
 
 /** 白名单：允许探测的 CLI 名称，防止意外执行任意命令。 */
 const ALLOWED_CLI_CANDIDATES = [
   'claude', 'claude-internal', 'tclaude', 'codex', 'codex-internal', 'tcodex', 'codebuddy', 'workbuddy', 'openclaw',
 ] as const;
 
-/** CLI 探测超时（毫秒），防止 execFileSync 挂死。 */
-const CLI_DETECT_TIMEOUT_MS = 5_000;
+/**
+ * Command lookup (`resolveCliPath` / `pickWindowsCommand`) lives in
+ * `utils/cli-path.ts` so the provider CLI wrappers (gh / cnb) share the same
+ * resolution logic. Re-exported here to keep existing imports working.
+ */
+export { pickWindowsCommand, resolveCliPath, resetCliPathCache } from './cli-path.js';
 
 /**
  * 默认 AI 调用超时时间（毫秒）。
@@ -27,17 +31,13 @@ interface CliInfo {
   absPath: string;
 }
 
+
 /**
  * 按优先级探测可用的 AI CLI，返回命令名与绝对路径。
  *
  * 各 CLI 非交互调用语法不同：
  *   - claude / claude-internal / codebuddy / workbuddy / openclaw：`<cli> -p <prompt>`
  *   - codex / codex-internal：`<cli> exec <prompt>`
- *
- * 依次通过以下方式获取绝对路径，确保覆盖各类 shell 环境：
- *   1. `bash -lc command -v <cmd>` —— login shell，覆盖 ~/.nvm/ 等路径
- *   2. `zsh -lc command -v <cmd>`  —— macOS 默认 shell fallback
- *   3. `which <cmd>` —— 最终 fallback，使用 process.env.PATH 直接查找
  *
  * 探测顺序：`claude` → `claude-internal` → `codex` → `codex-internal` → `codebuddy` → `workbuddy` → `openclaw`。
  * 结果缓存，进程生命周期内只探测一次。
@@ -46,54 +46,17 @@ interface CliInfo {
  * @throws  所有候选均不可用时抛出 Error
  */
 function detectClaudeCli(): CliInfo {
-  const candidates = ALLOWED_CLI_CANDIDATES;
-
-  for (const cmd of candidates) {
-    // 策略 1：bash login shell（shell: false 是 execFileSync 默认行为，此处显式标注）
-    try {
-      const p = execFileSync('bash', ['-lc', `command -v ${cmd}`], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        shell: false,
-        timeout: CLI_DETECT_TIMEOUT_MS,
-      }).trim();
-      if (p && existsSync(p)) return { cmd, absPath: p };
-    } catch {
-      // 继续尝试下一策略
-    }
-
-    // 策略 2：zsh login shell（macOS 默认 shell / bash 不可用时）
-    try {
-      const p = execFileSync('zsh', ['-lc', `command -v ${cmd}`], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        shell: false,
-        timeout: CLI_DETECT_TIMEOUT_MS,
-      }).trim();
-      if (p && existsSync(p)) return { cmd, absPath: p };
-    } catch {
-      // 继续尝试下一策略
-    }
-
-    // 策略 3：which 命令（使用 process.env.PATH，覆盖 fish / CI 容器等环境）
-    try {
-      const p = execFileSync('which', [cmd], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        shell: false,
-        timeout: CLI_DETECT_TIMEOUT_MS,
-      }).trim();
-      if (p && existsSync(p)) return { cmd, absPath: p };
-    } catch {
-      // 此候选不可用，尝试下一个
-    }
+  for (const cmd of ALLOWED_CLI_CANDIDATES) {
+    const absPath = resolveCliPath(cmd);
+    if (absPath !== null) return { cmd, absPath };
   }
 
   throw new Error(
-    'AI CLI 不可用：请安装以下任意一个 CLI 工具：' +
-    'claude / claude-internal / codex / codex-internal / codebuddy / workbuddy / openclaw'
+    'AI CLI unavailable: install one of claude / claude-internal / codex / ' +
+    'codex-internal / codebuddy / workbuddy / openclaw'
   );
 }
+
 
 /**
  * 根据 CLI 类型构建非交互参数数组。
@@ -128,6 +91,8 @@ export function getAICliName(): string {
  * 通过子进程直接调用 AI CLI（claude/codex 等），返回 stdout 文本。
  *
  * 按 CLI 类型自动选择 -p 或 exec 子命令，直接 spawn 绝对路径，不走 bash -lc，彻底消除 shell 拼接。
+ * spawn 使用 cross-spawn：Windows 上 CLI 多为 npm 生成的 `.cmd` shim，Node 原生
+ * spawn 无权直接执行 `.cmd`（报 EINVAL），cross-spawn 会正确地经 cmd.exe 启动并转义参数。
  * CLI 探测优先级：`claude` → `claude-internal` → `codex` → `codex-internal` → `codebuddy` → `workbuddy` → `openclaw`，
  * 结果缓存，进程内只探测一次。
  *
@@ -155,8 +120,8 @@ export async function callClaude(
     log.debug(`[ai-client] calling ${_cliInfo.cmd}, timeout=${Math.round(timeoutMs / 1000)}s, prompt=${prompt.slice(0, 60).replace(/\n/g, ' ')}...`);
     const child = spawn(_cliInfo.absPath, buildCliArgs(_cliInfo.cmd, prompt), { stdio: ['ignore', 'pipe', 'pipe'] });
 
-    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => errChunks.push(chunk));
+    child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
+    child.stderr?.on('data', (chunk: Buffer) => errChunks.push(chunk));
 
     // 超时控制
     const timer = setTimeout(() => {

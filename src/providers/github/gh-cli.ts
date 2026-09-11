@@ -1,5 +1,6 @@
-import { execSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { log, spinner } from '../../utils/logger.js';
+import { resolveCliPath } from '../../utils/cli-path.js';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -14,18 +15,18 @@ function shellQuote(s: string): string {
 
 // ─── gh CLI detection ────────────────────────────────────
 
-/** Returns the full path to gh if available on PATH, else null. */
+/**
+ * Absolute path to the `gh` executable if available on PATH, else null.
+ *
+ * Not `which gh`: on Windows that lands on Git's `which`, which prints an MSYS
+ * path (`/c/Program Files/GitHub CLI/gh`) that Node resolves as
+ * `C:\c\Program Files\...` — `spawnSync` then fails with ENOENT, i.e.
+ * `isGhInstalled()` answered "installed" while every `ghExec()` returned
+ * status 1 with an empty stderr. `resolveCliPath` uses the native `where` on
+ * Windows and accepts only a launchable path (`.exe` / `.cmd` / `.bat`).
+ */
 function getGhPath(): string | null {
-  try {
-    const which = execSync('which gh', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const trimmed = which.trim();
-    return trimmed || null;
-  } catch {
-    return null;
-  }
+  return resolveCliPath('gh');
 }
 
 /** Check whether the gh CLI is installed and on PATH. */

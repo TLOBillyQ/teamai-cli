@@ -160,7 +160,7 @@ teamai init https://github.com/yourorg/yourrepo --scope project --role hai_dev -
 | `--inherit-user-scope` | 仅 project scope：同时同步安全的 user 资源并检索 user 知识 |
 | `--no-inherit-user-scope` | 关闭当前项目先前配置的 user scope 继承 |
 | `--role <id>` | 直接指定 primaryRole，跳过角色交互选择 |
-| `--project <ids>` | 从 `manifest/projects.yaml` 激活的逻辑项目（逗号分隔）。决定本目录同步哪些项目的资源与 learnings。详见下方 [多项目](#多项目project-作为与-role-正交的维度) |
+| `--project <ids>` | 从 `manifest/projects.yaml` 激活的逻辑项目（逗号分隔）。决定本目录同步哪些项目的资源与 learnings。传 `all` 可激活 manifest 声明的全部项目。详见下方 [多项目](#多项目project-作为与-role-正交的维度) |
 | `--force` | 覆盖已有配置，跳过确认提示 |
 
 #### 多项目：`project` 作为与 `role` 正交的维度
@@ -184,6 +184,11 @@ cd ~/work/billing       && teamai init <team-repo> --project billing
   未激活任何项目的目录只能看到共享的根目录。
 - **不自动激活。** 与「唯一 role 会被自动选中」不同，唯一的 project 不会自动选中
   —— 成员可以不属于任何项目（仍能获得 `common` 与共享的 learnings 根）。
+- **一次激活全部。** `--project all` 是保留值：展开为 manifest 声明的全部 id
+  并落盘为快照，于是 monorepo 的接入文档只写一行，而不必维护一份「新增项目就会
+  漂移」的清单。它是对全部项目（含项目私有 learnings）的显式选择，重跑 `init`
+  即重新解析。id 恰好叫 `all` 的项目会被该展开覆盖，但无法用这个 flag 单独选中；
+  `teamai projects set all` 走的是字面 id，仍能单独激活它。
 - **向后兼容。** 没有 `manifest/projects.yaml` 的仓库行为与之前完全一致；现存扁平
   的 `learnings/*.md` 继续对所有人共享（零迁移）。
 - **`teamai contribute`** 在恰好激活一个项目时，把经验落到该项目子目录，否则落到
@@ -1096,6 +1101,8 @@ teamai import --from-repo https://github.com/org/repo --incremental
 teamai import --from-repo https://github.com/org/repo --skip-enrich
 ```
 
+需要 AI 的步骤（`--deep-enrich`、知识增强）复用本机已安装的 AI 编码 CLI，而不是直接调用模型 API。teamai 按 `claude` → `claude-internal` → `codex` → `codex-internal` → `codebuddy` → `workbuddy` → `openclaw` 的顺序探测，取第一个可用者。macOS / Linux 上探测经由 login shell，因此装在 `~/.nvm/` 下的 CLI 也能找到；Windows 上改用原生命令 `where`，拿到的是 Windows 真正能启动的 npm shim（`%APPDATA%\npm\claude.cmd`）——Git Bash 或 WSL 的 `bash` 只会返回 `/c/Users/...` 这类 MSYS 路径，Windows 无法启动。
+
 对于 API 网关后的 GitLab，先设置 `GITLAB_URL` 和 `GITLAB_API_PREFIX=api/gitlab`，再运行 `teamai import --from-org https://gitlab.example.com/myorg`。组织仓库列表的每一页请求都会使用配置的前缀；未设置或为空时默认使用 `api/v4`。
 
 图谱存储组件、接口、配置和跨仓库依赖关系。`teamai recall` 利用图谱进行 BM25 + graph-boost 增强排名。
@@ -1112,6 +1119,8 @@ teamai codebase --extract /path/to/repo --project my-service --incremental
 # 检查本地提取的图谱；--output 指向仓库根目录，而非 teamwiki/
 teamai codebase --lint --output /path/to/repo
 ```
+
+只要 extract 发现了组件，就会写入 `teamwiki/evidence/code/<project>/_manifest.json`（包括跳过 AI 增强或增强没有产出的情况），因此 `--deep-enrich` 可以接着跑。如果之前已经有 manifest（例如早先一次 AI 增强成功的产物），后续没有产出的运行会原样保留它，回退 manifest 不会覆盖。
 
 ### Dashboard
 
@@ -1309,6 +1318,21 @@ teamai remove mcp <name>
 
 用户级 `updatePolicy` 始终优先于团队级 `autoUpdate`。
 
+### Git 子模块
+
+若团队以 git submodule 形式分发 skill，在 `teamai.yaml` 中开启 `submodules: true`：
+
+```yaml
+submodules: true
+```
+
+每次 pull 时 teamai 会执行 `git submodule update --init`，按团队仓钉住的版本
+填充子模块（仅 git 仓后端生效；取完整子模块历史——浅取无法检出较旧的 pin）。
+默认关闭。若更新失败，pull 会记录警告并保留旧的同步版本号，下次 pull 会重新
+完整同步并自动重试（不会被"版本未变化"的快速路径跳过）。注意：子模块拉取
+依赖环境现有的 git 凭据——若宿主机采用按命令注入 token 的认证方式（而非配置
+credential helper），私有子模块将无法通过认证。
+
 ### CI 集成
 
 `teamai ci extract-mr` 接入 CI 流水线，从每个 MR/PR 自动提取知识：
@@ -1458,6 +1482,8 @@ teamai uninstall --agent claude
 跨工具共享资源（shell profile env 块、docs 目录、`~/.teamai/`）**仅当该工具自身存在 teamai 资源、且它是最后一个仍在使用 teamai 的工具时**才一并移除，否则会为其余工具保留。（因此，定向卸载一个自身没有任何 teamai 资源的工具是 no-op，即便它恰好是唯一的工具，也不会删除共享资源。）
 
 该排除是持久的：`uninstall --agent <tool>` 会把该工具从 `enabledAgents` 移除并记入 `disabledAgents`，因此之后的 `pull`（或其他工具的 session-start hook）不会再把它的 skills、rules、agents、CLAUDE.md 块或 hooks 重新装回。重新执行 `init --agent <tool>` 会清除该排除、恢复对该工具的同步。
+
+同一套 `enabledAgents` 白名单（来自 `init --agent`）也约束 CLI 内置 skills/rules/agents 以及 CLAUDE.md 类注入：即使工具根目录已经存在，白名单外的已安装工具也不会被写入。不经过 `init` 直接把工具加进 `enabledAgents` 时，last-pull 跳过缓存会对新加入的工具失效。
 
 卸载后如需重新加入：
 

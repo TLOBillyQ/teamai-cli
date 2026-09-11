@@ -167,7 +167,7 @@ teamai init https://github.com/yourorg/yourrepo --scope project --role hai_dev -
 | `--inherit-user-scope` | Project scope only: also sync safe user resources and search user knowledge |
 | `--no-inherit-user-scope` | Disable previously configured user-scope inheritance for this project |
 | `--role <id>` | Directly specify the primary role, skipping the interactive role prompt |
-| `--project <ids>` | Active logical project(s) from `manifest/projects.yaml` (comma-separated). Scopes which project resources and learnings this directory syncs. See [Multi-project](#multi-project-project-as-a-dimension-orthogonal-to-role) below |
+| `--project <ids>` | Active logical project(s) from `manifest/projects.yaml` (comma-separated). Scopes which project resources and learnings this directory syncs. Pass `all` to activate every project the manifest declares. See [Multi-project](#multi-project-project-as-a-dimension-orthogonal-to-role) below |
 | `--force` | Overwrite existing config, skipping confirmation prompts |
 
 #### Multi-project: `project` as a dimension orthogonal to `role`
@@ -196,6 +196,14 @@ learnings. Key points:
 - **Not auto-activated.** Unlike a lone role, a lone project is not auto-selected
   — a member may legitimately belong to no project (they still get `common` and
   the shared learnings root).
+- **Activate everything at once.** `--project all` is a reserved value: it
+  expands to every id the manifest declares and persists that snapshot, so a
+  monorepo's onboarding docs carry one line instead of a list that drifts
+  whenever a project is added. It is an explicit opt-in to every project —
+  project-private learnings included — and re-running `init` re-resolves it. A
+  project whose id is literally `all` is covered by the expansion but cannot be
+  selected on its own through this flag; `teamai projects set all` takes plain
+  ids and still activates exactly it.
 - **Backward compatible.** A repo without `manifest/projects.yaml` behaves exactly
   as before; existing flat `learnings/*.md` stay shared with everyone (zero
   migration).
@@ -1119,6 +1127,8 @@ teamai import --from-repo https://github.com/org/repo --incremental
 teamai import --from-repo https://github.com/org/repo --skip-enrich
 ```
 
+AI-backed steps (`--deep-enrich`, knowledge enrichment) shell out to an AI coding CLI already installed on the machine instead of calling a model API directly. teamai probes `claude` → `claude-internal` → `codex` → `codex-internal` → `codebuddy` → `workbuddy` → `openclaw` and uses the first one it finds. On macOS and Linux the probe runs through a login shell, so a CLI installed under `~/.nvm/` is found too. On Windows it uses the native `where`, which returns the npm shim (`%APPDATA%\npm\claude.cmd`) that Windows can actually launch — a Git Bash or WSL `bash` only reports MSYS paths such as `/c/Users/...`, which Windows cannot start.
+
 For GitLab behind an API gateway, set `GITLAB_URL` and `GITLAB_API_PREFIX=api/gitlab` before running `teamai import --from-org https://gitlab.example.com/myorg`. Organization listing uses the configured prefix on every page; an unset or blank prefix defaults to `api/v4`.
 
 The graph stores components, interfaces, configs, and cross-repo dependencies. `teamai recall` uses the graph for BM25 + graph-boosted ranking.
@@ -1135,6 +1145,8 @@ teamai codebase --extract /path/to/repo --project my-service --incremental
 # Check the local graph; --output is the repository root, not teamwiki/
 teamai codebase --lint --output /path/to/repo
 ```
+
+When extract finds components, it writes `teamwiki/evidence/code/<project>/_manifest.json` even if AI enrichment is skipped or produces nothing, so `--deep-enrich` can start. An existing manifest (for example from an earlier AI-enriched run) is kept as-is when a later run produces nothing; the fallback never overwrites it.
 
 ### Dashboard
 
@@ -1332,6 +1344,25 @@ Auto-update runs in the Stop hook and is controlled by two tiers:
 
 The user-level `updatePolicy` always takes priority over the team-level `autoUpdate`.
 
+### Git submodules
+
+If your team distributes skills as git submodules, opt in with `submodules: true`
+in `teamai.yaml`:
+
+```yaml
+submodules: true
+```
+
+On every pull, teamai runs `git submodule update --init` so submodule-based
+skills are populated at the revisions pinned by the team repo (git-repo
+backends only; the full submodule history is fetched, since a shallow fetch
+cannot check out older pins). Disabled by default. If the update fails, pull
+logs a warning and holds back the recorded revision, so the next pull
+re-syncs and retries the update instead of skipping it. Note: submodule
+fetching relies on the ambient git credentials — private submodules on hosts
+authenticated by per-command token injection (rather than a configured
+credential helper) will not authenticate.
+
 ### CI Integration
 
 `teamai ci extract-mr` plugs into your CI pipeline, automatically extracting knowledge from every MR/PR:
@@ -1481,6 +1512,8 @@ What gets removed:
 Shared resources (the env block, docs directory, and `~/.teamai/`) are removed **only when the target itself has teamai resources AND is the last tool still using teamai** — otherwise they are kept for the remaining tools. (So targeting a tool that has no teamai resources of its own is a no-op and leaves shared resources in place, even if it happens to be the only tool.)
 
 The exclusion is durable: `uninstall --agent <tool>` drops the tool from `enabledAgents` and records it in `disabledAgents`, so a later `pull` (or another tool's session-start hook) will not resurrect its skills, rules, agents, CLAUDE.md block, or hooks. Running `init --agent <tool>` again clears the exclusion and re-enables sync for that tool.
+
+The same `enabledAgents` whitelist (from `init --agent`) also gates CLI built-in skills/rules/agents and CLAUDE.md-class injects: an already-installed tool outside the list is not written to, even if its root directory already exists. Editing `enabledAgents` without `init` still invalidates the last-pull skip cache for newly added tools.
 
 To rejoin after uninstalling:
 

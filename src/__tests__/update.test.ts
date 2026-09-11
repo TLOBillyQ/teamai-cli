@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type MockInstance } from 'vitest';
 
 // ─── Mocks ──────────────────────────────────────────────
 
@@ -51,6 +51,10 @@ vi.mock('../types.js', () => ({
   TEAMAI_UPDATE_LOCK_PATH: '/tmp/test-update-lock',
 }));
 
+vi.mock('../builtin-hooks.js', () => ({
+  resolveTeamaiEntryScript: vi.fn(),
+}));
+
 let readlineAnswer = 'n';
 vi.mock('../utils/prompt.js', () => ({
   askQuestion: vi.fn((_prompt: string, defaultValue?: string) => {
@@ -67,6 +71,8 @@ vi.mock('../utils/prompt.js', () => ({
 // ─── Imports (after mocks) ──────────────────────────────
 
 import fse from 'fs-extra';
+import fs from 'node:fs';
+import path from 'node:path';
 import { loadState, saveState, loadLocalConfig, loadTeamConfig } from '../config.js';
 import { log } from '../utils/logger.js';
 
@@ -80,7 +86,11 @@ import {
   doUpdate,
   update,
   resolveRegistryForPackage,
+  getCurrentPackageName,
+  resolveNpmCommand,
+  prefixFromEntryPath,
 } from '../update.js';
+import { resolveTeamaiEntryScript } from '../builtin-hooks.js';
 
 // ─── Typed mock references ──────────────────────────────
 
@@ -252,7 +262,7 @@ describe('checkForUpdate', () => {
 
     expect(mockedExecSync).toHaveBeenCalledTimes(1);
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'npm',
+      expect.any(String),
       expect.arrayContaining(['view', 'version']),
       expect.any(Object),
     );
@@ -328,7 +338,7 @@ describe('doUpdate', () => {
 
     expect(mockedExecSync).toHaveBeenCalledTimes(3);
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'npm',
+      expect.any(String),
       expect.arrayContaining(['install', '-g']),
       expect.any(Object),
     );
@@ -423,7 +433,7 @@ describe('doUpdate', () => {
     // Only the version-check exec ran; no npm install
     expect(mockedExecSync).toHaveBeenCalledTimes(1);
     expect(mockedExecSync).not.toHaveBeenCalledWith(
-      'npm',
+      expect.any(String),
       expect.arrayContaining(['install']),
       expect.anything(),
     );
@@ -454,7 +464,7 @@ describe('doUpdate', () => {
     await doUpdate();
 
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'npm',
+      expect.any(String),
       expect.arrayContaining(['install', '-g']),
       expect.any(Object),
     );
@@ -567,7 +577,7 @@ describe('checkForUpdate with corrupted state', () => {
     const result = await checkForUpdate();
 
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'npm',
+      expect.any(String),
       expect.arrayContaining(['view', 'version']),
       expect.any(Object),
     );
@@ -616,7 +626,31 @@ describe('update', () => {
 // ─── Hook refresh after update tests ────────────────────
 
 describe('hook refresh after update', () => {
-  it('should spawn "teamai hooks inject --silent" after successful update', async () => {
+  const mockedEntry = resolveTeamaiEntryScript as Mock;
+
+  it('should run the resolved entry with the current Node binary', async () => {
+    // A .js entry cannot be spawned directly on Windows (no shebang/PATHEXT
+    // resolution) — the running Node must be the executable.
+    mockedEntry.mockReturnValue('/teamai/dist/index.js');
+    mockedExecSync
+      .mockResolvedValueOnce({ stdout: '99.0.0\n', stderr: '' }) // npm view
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })          // npm install
+      .mockResolvedValueOnce({ stdout: '', stderr: '' });         // hooks inject
+
+    await doUpdate();
+
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      process.execPath,
+      ['/teamai/dist/index.js', 'hooks', 'inject', '--silent'],
+      expect.objectContaining({ timeout: 15_000 }),
+    );
+    expect(mockedLog.success).toHaveBeenCalledWith(
+      expect.stringContaining('Refreshed hooks'),
+    );
+  });
+
+  it('should fall back to teamai from PATH when the entry cannot be resolved', async () => {
+    mockedEntry.mockReturnValue(null);
     mockedExecSync
       .mockResolvedValueOnce({ stdout: '99.0.0\n', stderr: '' }) // npm view
       .mockResolvedValueOnce({ stdout: '', stderr: '' })          // npm install
@@ -747,5 +781,113 @@ describe('releaseLock', () => {
     await releaseLock('/tmp/never-acquired-by-us');
 
     expect(mockedFse.remove).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Self-update resolvers (npm CLI + install prefix) ────
+
+/** Temporarily replace process.execPath (read by resolveNpmCommand). */
+function stubExecPath(value: string): () => void {
+  const original = process.execPath;
+  Object.defineProperty(process, 'execPath', { value, configurable: true });
+  return () => Object.defineProperty(process, 'execPath', { value: original, configurable: true });
+}
+
+describe('resolveNpmCommand', () => {
+  let restoreExecPath: () => void;
+  let existsSpy: MockInstance<typeof fs.existsSync>;
+
+  beforeEach(() => {
+    existsSpy = vi.spyOn(fs, 'existsSync');
+  });
+  afterEach(() => {
+    restoreExecPath();
+    existsSpy.mockRestore();
+  });
+
+  it('resolves npm-cli.js flat next to node (bundled-runtime layout)', () => {
+    restoreExecPath = stubExecPath(path.join('/runtime', 'node'));
+    const npmCli = path.join('/runtime', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    existsSpy.mockImplementation((p) => p === npmCli);
+
+    expect(resolveNpmCommand()).toEqual({ cmd: path.join('/runtime', 'node'), args: [npmCli] });
+  });
+
+  it('resolves npm one level up from bin (canonical POSIX prefix layout)', () => {
+    // Official tarball / nvm: <prefix>/bin/node + <prefix>/lib/node_modules/npm.
+    restoreExecPath = stubExecPath(path.join('/usr', 'local', 'bin', 'node'));
+    const npmCli = path.join('/usr', 'local', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    existsSpy.mockImplementation((p) => path.resolve(String(p)) === path.resolve(npmCli));
+
+    expect(resolveNpmCommand()).toEqual({ cmd: path.join('/usr', 'local', 'bin', 'node'), args: [npmCli] });
+  });
+
+  it('resolves npm from the Homebrew keg libexec layout', () => {
+    // Homebrew: <keg>/bin/node + <keg>/libexec/lib/node_modules/npm.
+    const keg = path.join('/opt', 'homebrew', 'Cellar', 'node', '26.8.2');
+    restoreExecPath = stubExecPath(path.join(keg, 'bin', 'node'));
+    const npmCli = path.join(keg, 'libexec', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    existsSpy.mockImplementation((p) => path.resolve(String(p)) === path.resolve(npmCli));
+
+    expect(resolveNpmCommand()).toEqual({ cmd: path.join(keg, 'bin', 'node'), args: [npmCli] });
+  });
+
+  it('falls back to npm from PATH when no co-located npm-cli.js exists', () => {
+    restoreExecPath = stubExecPath(path.join('/runtime', 'node'));
+    existsSpy.mockReturnValue(false);
+
+    expect(resolveNpmCommand()).toEqual({ cmd: 'npm', args: [] });
+  });
+});
+
+describe('prefixFromEntryPath', () => {
+  // The sanity check looks for the *running* package (scoped on this fork).
+  const pkgDir = path.join(...getCurrentPackageName().split('/'));
+  let existsSpy: MockInstance<typeof fs.existsSync>;
+
+  beforeEach(() => {
+    existsSpy = vi.spyOn(fs, 'existsSync');
+  });
+  afterEach(() => {
+    existsSpy.mockRestore();
+  });
+
+  it('strips the POSIX lib/ nesting and hands npm the prefix it expects', () => {
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
+    existsSpy.mockReturnValue(true);
+
+    expect(prefixFromEntryPath(entry, true)).toBe(path.join('/usr', 'local'));
+    // The sanity check must look under <prefix>/lib/node_modules/<pkg>.
+    expect(existsSpy).toHaveBeenCalledWith(
+      path.join('/usr', 'local', 'lib', 'node_modules', pkgDir),
+    );
+  });
+
+  it('returns the slice before node_modules on Windows layouts', () => {
+    const entry = path.join('C:', 'tools', 'node_modules', pkgDir, 'dist', 'index.js');
+    existsSpy.mockReturnValue(true);
+
+    expect(prefixFromEntryPath(entry, false)).toBe(path.join('C:', 'tools'));
+    expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', pkgDir));
+  });
+
+  it('returns null for non-lib roots on POSIX (npx cache, pnpm store, project-local installs)', () => {
+    const entry = path.join('/home', 'u', 'proj', 'node_modules', pkgDir, 'dist', 'index.js');
+    existsSpy.mockReturnValue(true);
+
+    expect(prefixFromEntryPath(entry, true)).toBeNull();
+  });
+
+  it('returns null for paths outside an npm-managed layout', () => {
+    existsSpy.mockReturnValue(true);
+
+    expect(prefixFromEntryPath(path.join('/home', 'u', 'dev', pkgDir, 'dist', 'index.js'), true)).toBeNull();
+  });
+
+  it('returns null when the package dir is not under the derived prefix', () => {
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
+    existsSpy.mockReturnValue(false);
+
+    expect(prefixFromEntryPath(entry, true)).toBeNull();
   });
 });

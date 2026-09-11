@@ -241,6 +241,9 @@ export const TeamaiConfigSchema = z.object({
    * can override via `updatePolicy` in local config. Undefined = team has no
    * opinion (preserves legacy behavior). */
   autoUpdate: z.boolean().optional(),
+  /** Run `git submodule update --init` on pull so skills distributed as git
+   * submodules are populated and kept current. Off by default. */
+  submodules: z.boolean().optional(),
   // MCP paths are only set for tools whose config location has been verified.
   // Tools left without `mcp` are skipped by MCP sync rather than guessed at, so a
   // wrong guess can never create a junk config file on a user's machine.
@@ -1297,6 +1300,20 @@ export function resolveBaseDir(localConfig: LocalConfig): string {
 /** True when `tool` is in localConfig.disabledAgents (excluded from teamai sync). */
 export function isAgentDisabled(localConfig: { disabledAgents?: string[] }, tool: string): boolean {
   return localConfig.disabledAgents?.includes(tool) ?? false;
+}
+
+/**
+ * True when `tool` should be skipped during resource sync: explicitly
+ * disabled via disabledAgents, or outside the enabledAgents whitelist when
+ * the team scoped its opt-in with `--agent` (undefined whitelist = all
+ * installed tools).
+ */
+export function isAgentExcluded(
+  localConfig: { disabledAgents?: string[]; enabledAgents?: string[] },
+  tool: string,
+): boolean {
+  if (isAgentDisabled(localConfig, tool)) return true;
+  return localConfig.enabledAgents ? !localConfig.enabledAgents.includes(tool) : false;
 }
 
 /**

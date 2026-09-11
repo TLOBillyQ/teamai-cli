@@ -730,6 +730,63 @@ async function runPhaseIndexEnhance(
 
 // ─── 主函数 ─────────────────────────────────────────────────
 
+/** Completion status of a deep-enrich run: which AI docs are still missing. */
+export interface DeepEnrichResult {
+  project: string;
+  complete: boolean;
+  missingComponents: string[];
+  missingArchitecture: boolean;
+}
+
+/**
+ * Compare `_manifest.json` components against the docs on disk. Used by the
+ * hidden CLI entry to decide whether the run actually produced every doc
+ * (`deepEnrich` itself skips components whose AI call failed).
+ */
+async function collectMissingDocs(evidenceDir: string, maxModules?: number): Promise<DeepEnrichResult['missingComponents'] | null> {
+  const ctx = await loadContext(evidenceDir);
+  let components = ctx.manifest.components ?? [];
+  if (components.length === 0) return null;
+  if (maxModules && components.length > maxModules) components = components.slice(0, maxModules);
+  const docsDir = path.join(evidenceDir, 'docs');
+  const missing: string[] = [];
+  for (const comp of components) {
+    if (!await pathExists(path.join(docsDir, `${comp.slug}.md`))) missing.push(comp.slug);
+  }
+  return missing;
+}
+
+/**
+ * Hidden `teamai deep-enrich` CLI entry. Sets a failing exit code when
+ * enrichment cannot complete (empty `_manifest.json` or missing AI docs).
+ */
+export async function runHiddenDeepEnrich(opts: {
+  project: string;
+  wikiRoot?: string;
+  maxModules?: number;
+}): Promise<DeepEnrichResult> {
+  const wikiRoot = opts.wikiRoot ?? path.join(process.cwd(), '.teamai', 'team-repo', 'teamwiki');
+  const evidenceDir = path.join(wikiRoot, 'evidence', 'code', opts.project);
+  await deepEnrich({
+    project: opts.project,
+    evidenceDir,
+    wikiRoot,
+    maxModules: opts.maxModules,
+  });
+  const missingComponents = await collectMissingDocs(evidenceDir, opts.maxModules);
+  const result: DeepEnrichResult = missingComponents === null
+    ? { project: opts.project, complete: false, missingComponents: [], missingArchitecture: true }
+    : {
+        project: opts.project,
+        missingComponents,
+        missingArchitecture: !await pathExists(path.join(evidenceDir, 'docs', 'architecture.md')),
+        complete: missingComponents.length === 0
+          && await pathExists(path.join(evidenceDir, 'docs', 'architecture.md')),
+      };
+  if (!result.complete) process.exitCode = 1;
+  return result;
+}
+
 /**
  * 对已导入仓库执行深度 AI 知识生成。
  *

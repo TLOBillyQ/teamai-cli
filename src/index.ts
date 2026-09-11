@@ -59,7 +59,7 @@ program
   .option('--inherit-user-scope', 'In project scope, also sync safe user-scope resources and search its knowledge')
   .option('--no-inherit-user-scope', 'Disable user-scope inheritance for this project')
   .option('--role <id>', 'Primary role ID (e.g. hai_dev) for non-interactive setup')
-  .option('--project <ids>', 'Active logical project(s) from manifest/projects.yaml (comma-separated); scopes which project resources and learnings this directory syncs')
+  .option('--project <ids>', 'Active logical project(s) from manifest/projects.yaml (comma-separated); scopes which project resources and learnings this directory syncs. Pass "all" to activate every project the manifest declares (a snapshot taken now)')
   // Non-variadic + a collecting coercer: repeatable (`--agent a --agent b`) and
   // comma-separated (`--agent a,b`, split later by normalizeAgentList) both work,
   // WITHOUT the greedy `<name...>` variadic that would swallow the `[repo]`
@@ -945,11 +945,12 @@ program
   .option('--wiki-root <path>', 'Teamwiki root path')
   .option('--max-modules <n>', 'Max modules to process (cost control)', parseInt)
   .action(async (cmdOpts: { project: string; wikiRoot?: string; maxModules?: number }) => {
-    const p = await import('node:path');
-    const wikiRoot = cmdOpts.wikiRoot ?? p.join(process.cwd(), '.teamai', 'team-repo', 'teamwiki');
-    const evidenceDir = p.join(wikiRoot, 'evidence', 'code', cmdOpts.project);
-    const { deepEnrich } = await import('./deep-enrich.js');
-    await deepEnrich({ project: cmdOpts.project, evidenceDir, wikiRoot, maxModules: cmdOpts.maxModules });
+    const { runHiddenDeepEnrich } = await import('./deep-enrich.js');
+    await runHiddenDeepEnrich({
+      project: cmdOpts.project,
+      wikiRoot: cmdOpts.wikiRoot,
+      maxModules: cmdOpts.maxModules,
+    });
   });
 
 recallCmd
