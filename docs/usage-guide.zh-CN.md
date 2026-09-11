@@ -1120,6 +1120,8 @@ teamai codebase --extract /path/to/repo --project my-service --incremental
 teamai codebase --lint --output /path/to/repo
 ```
 
+只要 extract 发现了组件，就会写入 `teamwiki/evidence/code/<project>/_manifest.json`（包括跳过 AI 增强或增强没有产出的情况），因此 `--deep-enrich` 可以接着跑。
+
 ### Dashboard
 
 ```bash
