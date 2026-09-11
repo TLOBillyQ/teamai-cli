@@ -1,6 +1,6 @@
 {
   "name": "@agent/teamai-cli",
-  "version": "0.23.2",
+  "version": "0.23.3",
   "description": "TeamAI — Make Every Team AI Native (skill sync + shared knowledge base, powered by Git)",
   "type": "module",
   "bin": {
