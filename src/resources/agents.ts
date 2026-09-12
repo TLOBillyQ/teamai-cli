@@ -31,6 +31,7 @@ import {
   reverseFromKiro,
   reverseFromOpencode,
   reverseFromWorkbuddy,
+  reverseFromKimi,
   mergeReverseResults,
   agentEffortField,
   toolExtrasFor,
@@ -1700,5 +1701,7 @@ function reverseByParser(tool: ToolName, filePath: string, content: string): Rev
       return reverseFromOpencode(filePath, content);
     case 'workbuddy':
       return reverseFromWorkbuddy(filePath, content);
+    case 'kimi':
+      return reverseFromKimi(filePath, content);
   }
 }

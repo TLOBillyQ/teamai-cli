@@ -512,6 +512,13 @@ export const TeamaiConfigSchema = z.object({
     // block in the workspace AGENTS.md, and a project gets none (#946).
     openclaw: { skills: '.openclaw/skills', claudemd: '.openclaw/workspace/AGENTS.md' },
     hermes: { skills: '.hermes/skills', claudemd: 'AGENTS.md' },
+    // Kimi Code CLI scans .kimi-code/skills and .kimi-code/agents natively and
+    // loads .kimi-code/AGENTS.md as workspace instructions. It has NO rules
+    // directory: a `rules` path here would land files the tool never reads, so
+    // team rules are inlined into AGENTS.md instead (see resources/rules.ts).
+    // Hooks have no settings path either — they live as `[[hooks]]` tables in
+    // the user-level ~/.kimi-code/config.toml, reconciled by src/kimi-hooks.ts.
+    kimi: { skills: '.kimi-code/skills', agents: '.kimi-code/agents', claudemd: '.kimi-code/AGENTS.md' },
     // DeepSeek Harness: skills synced to ~/.dsh/skills, which its skill-filesystem
     // provider scans as user-dsh root (rank 400). dsh discovers both directory
     // bundles (<name>/SKILL.md) and flat Markdown files there natively.

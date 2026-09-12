@@ -12,7 +12,9 @@ let tmpDir: string;
 let originalHome: string;
 let server: MockServerHandle | undefined;
 const API_KEY = 'e2e-key';
-const ENV_KEYS = ['TEAMAI_API_TOKEN', 'TEAMAI_API_KEY', 'TEAMAI_REPORT_ENDPOINT'];
+// KIMI_CODE_HOME is cleared so a developer's env override can never redirect
+// the kimi hook injector away from the stubbed HOME.
+const ENV_KEYS = ['TEAMAI_API_TOKEN', 'TEAMAI_API_KEY', 'TEAMAI_REPORT_ENDPOINT', 'KIMI_CODE_HOME'];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {

@@ -1655,6 +1655,33 @@ async function reconcileOpencodePlugin(baseDir: string, removeAll = false, insta
   }
 }
 
+/** Kimi homes already reported missing in this process (pull reconciles several scopes). */
+const reportedMissingKimiHomes = new Set<string>();
+
+/**
+ * Install the teamai hooks into kimi's user-level config.toml when the kimi
+ * home exists. Only Kimi Code itself creates that home, so a missing one is
+ * skipped. The skip used to be silent, and members who enabled kimi only found
+ * out by reading config.toml (issue #12), so it is a warning when kimi is in
+ * `explicitAgents`. Everyone else keeps a quiet pull (debug line only): kimi is
+ * in every team's toolPaths, and a tool dir alone (e.g. a `.kimi-code/`
+ * committed by single-repo mode) does not mean this member uses Kimi Code.
+ */
+async function injectKimiHooksOrWarn(explicitAgents: readonly string[] | undefined): Promise<void> {
+  const { getKimiHome, injectKimiHooks } = await import('./kimi-hooks.js');
+  const kimiHome = getKimiHome();
+  if (await pathExists(kimiHome)) {
+    await injectKimiHooks();
+    return;
+  }
+  if (!explicitAgents?.includes('kimi') || reportedMissingKimiHomes.has(kimiHome)) {
+    log.debug(`Kimi Code hooks skipped: ${kimiHome} does not exist`);
+    return;
+  }
+  reportedMissingKimiHomes.add(kimiHome);
+  log.warn(`Kimi Code hooks skipped: ${kimiHome} does not exist (run Kimi Code once, then re-run teamai pull)`);
+}
+
 /**
  * Reconcile the single teamai OMP extension.
  *
@@ -1755,8 +1782,17 @@ async function reconcilePiExtension(
  * Inject teamai built-in hooks into all AI tool settings.
  * Only writes to tools whose root directory already exists on disk,
  * preventing creation of config dirs for tools the user hasn't installed.
+ *
+ * `explicitAgents` (default `filterAgents`) only decides whether a missing
+ * Kimi Code home is reported; pass it when `filterAgents` was widened to
+ * "every tool minus disabledAgents".
  */
-export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>, baseDir?: string, filterAgents?: string[]): Promise<void> {
+export async function injectHooksToAllTools(
+  toolPaths: Record<string, { settings?: string }>,
+  baseDir?: string,
+  filterAgents?: string[],
+  explicitAgents: string[] | undefined = filterAgents,
+): Promise<void> {
   const resolvedBaseDir = baseDir ?? getUserHome();
   const skipped = skipToolsWithoutShell(
     Object.keys(toolPaths).filter(t => !filterAgents || filterAgents.includes(t)),
@@ -1792,6 +1828,12 @@ export async function injectHooksToAllTools(toolPaths: Record<string, { settings
         await injectHermesHooks();
       } catch (e) {
         log.warn(`Failed to inject Hermes hook: ${(e as Error).message}`);
+      }
+    } else if (tool === 'kimi') {
+      try {
+        await injectKimiHooksOrWarn(explicitAgents);
+      } catch (e) {
+        log.warn(`Failed to inject Kimi Code hooks: ${(e as Error).message}`);
       }
     } else if (tool === 'opencode') {
       try {
@@ -1840,21 +1882,26 @@ async function builtinsInstalled(
  * injection path used by `teamai pull` / `init` / `hooks inject`.
  *
  * `settingsOnly` restricts the pass to tools reconciled through their settings
- * file, skipping Hermes, OpenCode, and OMP. Those three go through global
- * adapters that ignore `baseDir` — `removeHermesHooks()` takes none, and the
- * OpenCode / OMP adapters' removeAll branches always target HOME — so a caller
- * sweeping a secondary location (the legacy `<projectRoot>` copy) must opt out,
- * or it deletes the hooks the primary pass just installed.
+ * file, skipping Hermes, Kimi Code, OpenCode, and OMP. Those go through global
+ * adapters that ignore `baseDir` — `removeHermesHooks()` / `removeKimiHooks()`
+ * take none, and the OpenCode / OMP adapters' removeAll branches always target
+ * HOME — so a caller sweeping a secondary location (the legacy `<projectRoot>`
+ * copy) must opt out, or it deletes the hooks the primary pass just installed.
  *
  * `builtinsOnly` (see BuiltinsOnly) installs the built-in hooks where they are
  * missing and leaves every installed team hook and the manifest as they are.
+ *
+ * `explicitAgents` names the agents the user explicitly enabled (defaults to
+ * `filterAgents`). It only decides whether a skipped Kimi Code install is
+ * reported; pass it when `filterAgents` was widened to "every tool minus
+ * disabledAgents", which is not an explicit choice.
  */
 export async function reconcileHooksToAllTools(
   toolPaths: Record<string, { settings?: string }>,
   baseDir: string,
   teamDefs: HookDef[],
   manifestPath: string,
-  opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[]; settingsOnly?: boolean; installedBaseDir?: string; teamHookProjectRoot?: string; scope?: Scope; builtinsOnly?: BuiltinsOnly; mainCheckout?: MainCheckoutHooks | null } = {},
+  opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[]; explicitAgents?: string[]; settingsOnly?: boolean; installedBaseDir?: string; teamHookProjectRoot?: string; scope?: Scope; builtinsOnly?: BuiltinsOnly; mainCheckout?: MainCheckoutHooks | null } = {},
 ): Promise<Set<string>> {
   // Without the manifest, reconcileHooks manages the built-in entries only.
   const teamManifestPath = opts.builtinsOnly ? undefined : manifestPath;
@@ -1933,6 +1980,24 @@ export async function reconcileHooksToAllTools(
         }
       } catch (e) {
         log.warn(`Failed to reconcile OpenClaw hooks for ${tool}: ${(e as Error).message}`);
+      }
+      continue;
+    }
+    // Kimi Code CLI keeps hooks as `[[hooks]]` tables in its user-level
+    // config.toml (project-level local.toml has no hooks support), so every
+    // scope installs there. Install when the kimi home exists (a missing one is
+    // reported when kimi was enabled explicitly); removeAll strips exactly the teamai entries.
+    if (tool === 'kimi') {
+      if (opts.settingsOnly) continue;
+      try {
+        if (opts.removeAll) {
+          const { removeKimiHooks } = await import('./kimi-hooks.js');
+          await removeKimiHooks();
+        } else {
+          await injectKimiHooksOrWarn(opts.explicitAgents ?? opts.filterAgents);
+        }
+      } catch (e) {
+        log.warn(`Failed to reconcile Kimi Code hooks: ${(e as Error).message}`);
       }
       continue;
     }
@@ -2374,6 +2439,8 @@ export async function reconcileTeamHooksForConfig(
     removeAll: opts.removeAll,
     builtinOverride: builtin,
     filterAgents,
+    // The explicit whitelist, not the widened universe above.
+    explicitAgents: explicitlySelectedAgents ?? [],
     teamHookProjectRoot: localConfig.scope === 'project' && !isSelfMode(localConfig)
       ? localConfig.projectRoot
       : undefined,

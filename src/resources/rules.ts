@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { isToolInstalledForConfig, ResourceHandler, type PlacementRecords } from './base.js';
+import matter from 'gray-matter';
+import { mergeManagedBlock } from '../utils/claudemd.js';
 import type { ResourceItem, ResourceItemStatus, DeliveryTarget, TeamaiConfig, LocalConfig } from '../types.js';
 import { listFilesRecursive, pathExists, copyFile, ensureDir, remove, fileContentEqual, getFileMtime, listDirs, readFileSafe, writeFile, pruneEmptyDirs, fileHash } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
@@ -35,6 +37,7 @@ import {
   keptLegacyCopiesWarning,
   type LegacyRuleDir,
   type RuleFormat,
+  inlinesRulesIntoInstructions,
 } from './rule-format.js';
 import { injectClaudeMdSection, removeClaudeMdSection } from '../utils/claudemd.js';
 
@@ -716,6 +719,11 @@ export class RulesHandler extends ResourceHandler {
     // early return so removing the last rule also removes the glob.
     await this.activateOpencodeInstructions(teamConfig, localConfig, rules);
 
+    // Kimi Code CLI has no rules directory: inline the rule bodies into a
+    // managed block of its AGENTS.md. Also before the early return so the block
+    // disappears when the team's last rule is removed.
+    await this.inlineRulesIntoInstructionFiles(teamConfig, localConfig, rules);
+
     // Empty set = no team rule reaches this directory right now. We deliberately do
     // NOT run the aggressive stale-file cleanup below in that case, because it would
     // treat a user's own personal rule files as stale and delete them. Explicit team
@@ -864,17 +872,77 @@ export class RulesHandler extends ResourceHandler {
       await this.removeEmptyDirs(destDir);
     }
 
-    // 2. Remove legacy rules section from CLAUDE.md (no longer injected)
+    // 2. Remove legacy rules section from CLAUDE.md (no longer injected). Tools
+    // that get rules inlined into their instructions file use the same markers
+    // on purpose, so they are excluded from this cleanup.
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!toolPath.claudemd) continue;
+      if (inlinesRulesIntoInstructions(tool)) continue;
       const baseDir = resolveToolBaseDir(tool, localConfig);
-      const claudeMdPath = path.join(baseDir, toolPath.claudemd);
       try {
         if (await removeClaudeMdSection(claudeMdPath, TEAMAI_RULES_START, TEAMAI_RULES_END, { deleteIfEmpty: true })) {
           log.debug(`Removed legacy rules section from ${claudeMdPath}`);
         }
       } catch {
         // Best-effort cleanup
+      }
+    }
+  }
+
+  /**
+   * Inline every team rule body into a teamai-managed block of the instructions
+   * file (`claudemd`) of tools that have no rules directory (Kimi Code CLI).
+   * An empty rule set removes the block. Only touches tools that are installed
+   * for this scope — never creates `.kimi-code/` for someone who doesn't use it.
+   */
+  private async inlineRulesIntoInstructionFiles(
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+    rules: ResourceItem[],
+  ): Promise<void> {
+    const baseDir = resolveBaseDir(localConfig);
+    let bodies: string[] | null = null;
+
+    for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+      if (!inlinesRulesIntoInstructions(tool)) continue;
+      if (isAgentExcluded(localConfig, tool)) continue;
+      if (!toolPath.claudemd) continue;
+      if (!await ResourceHandler.isToolInstalled(toolPath.claudemd, baseDir)) continue;
+
+      if (bodies === null) {
+        bodies = [];
+        for (const rule of rules) {
+          const raw = await readFileSafe(rule.sourcePath);
+          if (raw === null) continue;
+          // Team rules may carry tool-neutral frontmatter (`paths:` …) that means
+          // nothing inside a system prompt; keep only the markdown body. Marker
+          // lines inside a rule would corrupt the block boundary, so drop them.
+          const body = matter(raw).content
+            .split('\n')
+            .filter((line) => line.trim() !== TEAMAI_RULES_START && line.trim() !== TEAMAI_RULES_END)
+            .join('\n')
+            .trim();
+          if (body !== '') bodies.push(body);
+        }
+      }
+
+      const blockBody = bodies.length > 0
+        ? ['<!-- DO NOT EDIT: This section is auto-managed by teamai -->', '', ...bodies.flatMap((b) => [b, ''])].join('\n')
+        : '';
+      const filePath = path.join(baseDir, toolPath.claudemd);
+      try {
+        const existing = (await readFileSafe(filePath)) ?? '';
+        const merged = mergeManagedBlock(existing, TEAMAI_RULES_START, TEAMAI_RULES_END, blockBody);
+        if (merged === existing.trim()) continue;
+        if (merged === '') {
+          if (await pathExists(filePath)) await remove(filePath);
+        } else {
+          await ensureDir(path.dirname(filePath));
+          await writeFile(filePath, merged + '\n');
+        }
+        log.debug(`Inlined ${bodies.length} rule(s) into ${tool} instructions at ${filePath}`);
+      } catch (e) {
+        log.warn(`Failed to inline rules into ${tool} instructions at ${filePath}: ${(e as Error).message}`);
       }
     }
   }

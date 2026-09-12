@@ -28,4 +28,8 @@ describe('normalizeToolName', () => {
     expect(normalizeToolName('SomeNewTool')).toBe('SomeNewTool');
     expect(normalizeToolName('')).toBe('');
   });
+
+  it('maps the Kimi Code CLI todo tool onto the name the handlers key on', () => {
+    expect(normalizeToolName('TodoList')).toBe('TodoWrite');
+  });
 });
