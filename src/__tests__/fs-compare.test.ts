@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import fse from 'fs-extra';
@@ -9,7 +9,49 @@ import {
   getDirLatestMtime,
   hasVcsMetadataRecursive,
   pruneEmptyDirs,
+  listDirs,
+  listFiles,
+  listFilesRecursive,
 } from '../utils/fs.js';
+
+describe('directory listings are ordered by name, independent of readdir order', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-fs-order-'));
+    // Simulate a hash-ordered filesystem (e.g. ext4) by reversing readdir output.
+    const realReaddir = fse.readdir.bind(fse) as (...args: unknown[]) => Promise<unknown[]>;
+    vi.spyOn(fse, 'readdir').mockImplementation((async (...args: unknown[]) =>
+      (await realReaddir(...args)).reverse()) as never);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fse.remove(tmpDir);
+  });
+
+  it('listFilesRecursive walks each directory level in name order', async () => {
+    await fse.ensureDir(path.join(tmpDir, 'b-dir'));
+    await fse.writeFile(path.join(tmpDir, 'a.md'), '');
+    await fse.writeFile(path.join(tmpDir, 'c.md'), '');
+    await fse.writeFile(path.join(tmpDir, 'B.md'), '');
+    await fse.writeFile(path.join(tmpDir, 'b-dir', 'y.md'), '');
+    await fse.writeFile(path.join(tmpDir, 'b-dir', 'x.md'), '');
+
+    // Code-unit order (uppercase before lowercase), not locale order.
+    expect(await listFilesRecursive(tmpDir)).toEqual(['B.md', 'a.md', 'b-dir/x.md', 'b-dir/y.md', 'c.md']);
+  });
+
+  it('listDirs returns directory names in name order', async () => {
+    for (const d of ['gamma', 'alpha', 'beta']) await fse.ensureDir(path.join(tmpDir, d));
+    expect(await listDirs(tmpDir)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('listFiles returns file names in name order', async () => {
+    for (const f of ['2.md', '10.md', '1.md']) await fse.writeFile(path.join(tmpDir, f), '');
+    expect(await listFiles(tmpDir)).toEqual(['1.md', '10.md', '2.md']);
+  });
+});
 
 describe('fileContentEqual', () => {
   let tmpDir: string;

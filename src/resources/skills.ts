@@ -15,6 +15,7 @@ import {
 import { loadProjectsManifest, resolveProjectResourceNamespaces } from '../projects.js';
 import { assertSafeFallbackNamespaces } from '../manifest-schema.js';
 import { assertWithinRoot, resolveReal } from '../utils/path-safety.js';
+import { findDuplicateSkillNames, reportDuplicateSkills } from './skill-duplicates.js';
 import { splitFrontmatter, stringifyFrontmatter } from '../utils/frontmatter.js';
 import { keepsEditedCopy, recordDelivered, type DeliveredHashes, type DeliveryLedger } from './delivered-copies.js';
 
@@ -553,6 +554,29 @@ export class SkillsHandler extends ResourceHandler {
       }
     }
 
+    // A name found at more than one visible team path is ambiguous: push
+    // refuses it rather than attributing the edit to one group.
+    const allTeamSkills = await this.scanTeamForPull(teamConfig, localConfig);
+    // #707: a namespace skill in an allowed scope replaces the root skill of
+    // its name (pull delivers the namespace copy and withdraws the root), so
+    // the replaced root is not visible to this member and cannot make the
+    // name ambiguous.
+    const replacedRootNames = new Set(
+      allTeamSkills
+        .filter((item) => item.namespace && scopedNamespaces.includes(item.namespace))
+        .map((item) => item.name),
+    );
+    const visibleTeamSkills = scopedNamespaces.length > 0
+      ? allTeamSkills.filter((item) =>
+          item.namespace
+            ? scopedNamespaces.includes(item.namespace)
+            : !replacedRootNames.has(item.name))
+      : allTeamSkills;
+    const ambiguousSkills = new Map(findDuplicateSkillNames(visibleTeamSkills).map((d) => [d.name, d]));
+
+    // Local skills whose name is ambiguous in the team repo: push refuses them.
+    const refusedSkills = new Set<string>();
+
     // Read tombstones to skip previously deleted resources
     const tombstones = await this.readTombstones(localConfig);
     const pushIgnoredSkills = await readPushIgnoredSkills();
@@ -597,6 +621,10 @@ export class SkillsHandler extends ResourceHandler {
           continue;
         }
 
+        if (ambiguousSkills.has(dir)) {
+          refusedSkills.add(dir);
+          continue;
+        }
         if (teamSkills.has(dir)) {
           // Skill exists in team repo — check if content differs
           const teamDirPath = teamSkills.get(dir)!.dir;
@@ -653,6 +681,10 @@ export class SkillsHandler extends ResourceHandler {
         namespace: ns,
       });
     }
+
+    // Push refuses a skill whose name is ambiguous in the team repo; every
+    // other candidate stays pushable.
+    reportDuplicateSkills([...ambiguousSkills.values()].filter((d) => refusedSkills.has(d.name)));
 
     return items;
   }

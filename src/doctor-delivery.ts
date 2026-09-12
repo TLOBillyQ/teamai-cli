@@ -230,6 +230,10 @@ export async function buildDeliveryChecks(ctx: DoctorContext): Promise<Check[]> 
   try {
     const desired = await resolveDesiredSkills(teamConfig, localConfig, await buildRolePullContext(localConfig));
     if (desired.kind === 'conflict') return unresolvableCheck('skills', describeDeliveryConflict(desired));
+    const { findDuplicateSkillNames, formatDuplicateSkills } = await import('./resources/skill-duplicates.js');
+    const overriddenNames = new Set(desired.overrides.map((override) => override.name));
+    const duplicates = findDuplicateSkillNames(desired.teamItems.filter((item) => !overriddenNames.has(item.name)));
+    if (duplicates.length > 0) return unresolvableCheck('skills', formatDuplicateSkills(duplicates));
     ({ items } = desired);
   } catch (e) {
     return unresolvableCheck('skills', e instanceof Error ? e.message : String(e));

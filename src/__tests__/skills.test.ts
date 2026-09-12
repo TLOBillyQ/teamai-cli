@@ -620,6 +620,146 @@ scope: 'user',
   });
 });
 
+describe('SkillsHandler.scanLocalForPush with duplicate team skill names', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let repoPath: string;
+  let handler: SkillsHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  async function writeSkill(root: string, rel: string, body: string): Promise<void> {
+    await fse.ensureDir(path.join(root, rel));
+    await fse.writeFile(path.join(root, rel, 'SKILL.md'), body);
+  }
+
+  beforeEach(async () => {
+    const { resetReportedDuplicateSkills } = await import('../resources/skill-duplicates.js');
+    resetReportedDuplicateSkills();
+    vi.mocked(log.error).mockClear();
+    process.exitCode = undefined;
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-skills-dup-push-'));
+    homeDir = path.join(tmpDir, 'home');
+    repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'skills'));
+    await fse.ensureDir(path.join(homeDir, '.claude', 'skills'));
+    vi.stubEnv('HOME', homeDir);
+    handler = new SkillsHandler();
+    teamConfig = {
+      team: 'test',
+      description: '',
+      repo: 'https://git.woa.com/test/repo.git',
+      provider: 'tgit' as const,
+      reviewers: [],
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: { claude: { skills: '.claude/skills', rules: '.claude/rules' } },
+    };
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+      updatePolicy: 'auto',
+      additionalRoles: [],
+      scope: 'user',
+    };
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  it('refuses a local skill whose name is ambiguous across groups, listing every path', async () => {
+    await writeSkill(repoPath, 'skills/a/x', '# From a');
+    await writeSkill(repoPath, 'skills/b/x', '# From b');
+    // The copy a pull would have installed from the last-scanned group.
+    await writeSkill(homeDir, '.claude/skills/x', '# From b');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+
+    expect(items).toEqual([]);
+    expect(process.exitCode).toBe(1);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate skill "x" found in "skills/a/x" and "skills/b/x"'),
+    );
+  });
+
+  it('refuses a local skill whose name matches both a top-level and a grouped skill', async () => {
+    await writeSkill(repoPath, 'skills/x', '# Top');
+    await writeSkill(repoPath, 'skills/a/x', '# From a');
+    await writeSkill(homeDir, '.claude/skills/x', '# Edited');
+
+    expect(await handler.scanLocalForPush(teamConfig, localConfig)).toEqual([]);
+    expect(process.exitCode).toBe(1);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(expect.stringContaining('"skills/a/x" and "skills/x"'));
+  });
+
+  it('attributes the edit to the allowed-namespace skill that replaces the top-level one (#707)', async () => {
+    // Since #707 an active namespace skill replaces the root skill of its
+    // name: pull delivers skills/hai/x and withdraws skills/x, so the member's
+    // edited copy is hai's and the name is not ambiguous.
+    await fse.ensureDir(path.join(repoPath, 'manifest'));
+    await fse.writeFile(path.join(repoPath, 'manifest', 'roles.yaml'), [
+      'version: 1',
+      'roles:',
+      '  - id: hai',
+      '    name: HAI',
+      '    resources:',
+      '      knowledge: [hai]',
+      '      skills: [hai]',
+      '      learnings: [hai]',
+      '',
+    ].join('\n'));
+    await writeSkill(repoPath, 'skills/x', '# Top');
+    await writeSkill(repoPath, 'skills/hai/x', '# From hai');
+    await writeSkill(homeDir, '.claude/skills/x', '# From hai, edited');
+
+    const items = await handler.scanLocalForPush(teamConfig, { ...localConfig, primaryRole: 'hai' });
+    const item = items.find((i) => i.name === 'x');
+    expect(item?.status).toBe('modified');
+    expect(item?.namespace).toBe('hai');
+    expect(item?.relativePath).toBe('skills/hai/x');
+    expect(process.exitCode).not.toBe(1);
+
+    for (const pushed of items) await handler.pushItem(pushed, teamConfig, { ...localConfig, primaryRole: 'hai' });
+    expect(await fse.readFile(path.join(repoPath, 'skills', 'hai', 'x', 'SKILL.md'), 'utf8')).toContain('# From hai, edited');
+    expect(await fse.readFile(path.join(repoPath, 'skills', 'x', 'SKILL.md'), 'utf8')).toBe('# Top');
+  });
+
+  it('refuses only the ambiguous skill and keeps every other candidate pushable', async () => {
+    await writeSkill(repoPath, 'skills/a/x', '# From a');
+    await writeSkill(repoPath, 'skills/b/x', '# From b');
+    await writeSkill(homeDir, '.claude/skills/x', '# Edited');
+    await writeSkill(homeDir, '.claude/skills/fresh', '# Fresh');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+
+    expect(items.map((i) => i.name)).toEqual(['fresh']);
+    expect(process.exitCode).toBe(1);
+    expect(vi.mocked(log.error)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(expect.stringContaining('Duplicate skill "x"'));
+  });
+
+  it('does not block unrelated skills when the ambiguous skill has no local copy', async () => {
+    await writeSkill(repoPath, 'skills/a/x', '# From a');
+    await writeSkill(repoPath, 'skills/b/x', '# From b');
+    await writeSkill(homeDir, '.claude/skills/fresh', '# Fresh');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    expect(items.map((i) => i.name)).toEqual(['fresh']);
+    expect(process.exitCode).toBeUndefined();
+    expect(vi.mocked(log.error)).not.toHaveBeenCalled();
+  });
+
+  it('offers no phantom modified skill once the conflict is renamed away', async () => {
+    await writeSkill(repoPath, 'skills/a/x', '# From a');
+    await writeSkill(repoPath, 'skills/b/x-b', '# From b');
+    await writeSkill(homeDir, '.claude/skills/x', '# From a');
+    await writeSkill(homeDir, '.claude/skills/x-b', '# From b');
+
+    expect(await handler.scanLocalForPush(teamConfig, localConfig)).toEqual([]);
+  });
+});
+
 describe('SkillsHandler.pushItem', () => {
   let tmpDir: string;
   let homeDir: string;

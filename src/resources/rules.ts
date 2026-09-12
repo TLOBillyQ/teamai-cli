@@ -879,6 +879,7 @@ export class RulesHandler extends ResourceHandler {
       if (!toolPath.claudemd) continue;
       if (inlinesRulesIntoInstructions(tool)) continue;
       const baseDir = resolveToolBaseDir(tool, localConfig);
+      const claudeMdPath = path.join(baseDir, toolPath.claudemd);
       try {
         if (await removeClaudeMdSection(claudeMdPath, TEAMAI_RULES_START, TEAMAI_RULES_END, { deleteIfEmpty: true })) {
           log.debug(`Removed legacy rules section from ${claudeMdPath}`);

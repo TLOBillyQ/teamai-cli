@@ -23,6 +23,7 @@ import { reportHeldAgents, type RedeployedCopy } from './resources/agents.js';
 import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } from './resources/docs.js';
 import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
+import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
 import { flatStemsOfRemoved, ruleFileExtensionForTool, ruleFormatForTool, ruleStemsForTool } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import {
@@ -1637,11 +1638,19 @@ async function pullForScope(
         if (result) result.resourceSyncFailed = true;
         continue;
       }
-      items = desired.items;
+      const overriddenNames = new Set(desired.overrides.map((o) => o.name));
+      const rootNames = new Set(desired.teamItems.filter((item) => !item.namespace).map((item) => item.name));
+      const activeSkillNamespaces = roleContext?.activeNamespaces.skills ?? [];
+      const candidates = desired.teamItems.filter((item) => !overriddenNames.has(item.name)
+        && !(roleContext && item.namespace && rootNames.has(item.name) && !activeSkillNamespaces.includes(item.namespace)));
+      const duplicates = findDuplicateSkillNames(candidates);
+      const ambiguous = new Set(duplicates.map((d) => d.name));
+      reportDuplicateSkills(duplicates, `[${scopeLabel}] `);
+      items = desired.items.filter((item) => !ambiguous.has(item.name));
       skippedByTags = desired.skippedByTags;
       desiredSkillNames = new Set(items.map((i) => i.name));
-      knownRepoSkillNames = new Set(desired.teamItems.map((i) => i.name));
-      knownRepoSkillSources = new Map(desired.teamItems.map((i) => [i.name, i.sourcePath]));
+      knownRepoSkillNames = new Set(desired.teamItems.filter((item) => !ambiguous.has(item.name)).map((i) => i.name));
+      knownRepoSkillSources = new Map(desired.teamItems.filter((item) => !ambiguous.has(item.name)).map((i) => [i.name, i.sourcePath]));
       rootRepoSkillNames = new Set(desired.teamItems.filter((i) => !i.namespace).map((i) => i.name));
     } else if (type === 'agents') {
       const desired = await resolveDesiredAgents(freshConfig, localConfig, roleContext);
@@ -1761,7 +1770,7 @@ async function pullForScope(
   }
 
   // Step 3b: Clean up local skills not in the desired union set (role + tags)
-  if (!options.dryRun && desiredSkillNames && knownRepoSkillNames) {
+  if (!options.dryRun && desiredSkillNames && knownRepoSkillSources) {
     const baseDir = resolveBaseDir(localConfig);
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
@@ -1775,7 +1784,7 @@ async function pullForScope(
       for (const dir of localDirs) {
         if (BUILTIN_SKILL_NAMES.has(dir)) continue;
         if (desiredSkillNames.has(dir)) continue;
-        if (!knownRepoSkillNames.has(dir)) continue;
+        if (!knownRepoSkillSources.has(dir)) continue;
         const skillDir = path.join(skillsDir, dir);
         // Same data-safety gate as cleanupInactiveNamespaceSkills: never delete a
         // deployed skill that differs from its team-repo source (local edits or

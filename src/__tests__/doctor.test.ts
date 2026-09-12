@@ -966,6 +966,62 @@ describe('doctor — the recorded Claude Code root', () => {
         // Re-running init cannot record this value, so the fix says why instead.
         expect(check!.fix).toContain('outside the home directory');
         expect(check!.fix).not.toContain('to record it');
+    });
+});
+
+describe('doctor — unrecognized teamai.yaml keys', () => {
+    function withTeamaiYaml(content: string): void {
+        mockedReadFileSafe.mockImplementation(async (filePath: string) => {
+            if (filePath === path.join(mockLocalConfig.repo.localPath, 'teamai.yaml')) return content;
+            if (filePath.includes('settings.json')) return buildFullHooksContent();
+            if (filePath.includes('.zshrc') || filePath.includes('.bashrc')) return '# [teamai:env:start]';
+            return null;
+        });
+    }
+
+    function lines(): string[] {
+        return consoleSpy.mock.calls.map((c) => String(c[0]));
+    }
+
+    function output(): string {
+        return lines().join('\n');
+    }
+
+    it('warns about unknown top-level keys without failing any check', async () => {
+        withTeamaiYaml([
+            'team: test-team',
+            'repo: team/repo',
+            'foo: 1',
+            '',
+        ].join('\n'));
+
+        await doctor({});
+
+        const warning = lines().find((l) => l.includes('⚠') && l.includes('teamai.yaml'));
+        expect(warning).toBeDefined();
+        expect(warning).toContain('foo');
+        expect(warning).not.toContain('scope');
+        expect(output()).not.toContain('✖');
+        expect(mockedLog.success).toHaveBeenCalledWith('All checks passed!');
+    });
+
+    it('does not warn when every top-level key is recognized', async () => {
+        withTeamaiYaml([
+            'team: test-team',
+            'repo: team/repo',
+            'provider: tgit',
+            'sharing:',
+            '  docs:',
+            '    localDir: ~/.teamai/docs',
+            '',
+        ].join('\n'));
+
+        await doctor({});
+
+        expect(output()).not.toContain('teamai.yaml has keys');
+    });
+});
+
 describe('doctor — kimi hook check (issue #12)', () => {
     // getKimiHome() path.resolve()s the env var, so resolve here too — a raw
     // POSIX path re-roots on Windows and the exact-string mocks never match.

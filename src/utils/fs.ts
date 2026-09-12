@@ -277,27 +277,41 @@ export async function copyFile(src: string, dest: string): Promise<void> {
 }
 
 /**
- * List directories in a path (non-recursive, only directories)
+ * readdir with entries sorted by name. Raw readdir order is filesystem-defined
+ * (name order on APFS/NTFS, hash order on ext4), so anything built from a
+ * listing — e.g. rules inlined into an instructions file — would differ across
+ * machines. Code-unit comparison, not localeCompare, so the order does not
+ * depend on the machine's locale either.
+ */
+async function readdirSorted(dir: string): Promise<fse.Dirent[]> {
+  const entries = await fse.readdir(dir, { withFileTypes: true });
+  return entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/**
+ * List directories in a path (non-recursive, only directories), sorted by name.
  */
 export async function listDirs(dirPath: string): Promise<string[]> {
   const expanded = expandHome(dirPath);
   if (!await fse.pathExists(expanded)) return [];
-  const entries = await fse.readdir(expanded, { withFileTypes: true });
+  const entries = await readdirSorted(expanded);
   return entries.filter(e => e.isDirectory() && !isIgnored(e.name)).map(e => e.name);
 }
 
 /**
- * List files in a path (non-recursive, only files)
+ * List files in a path (non-recursive, only files), sorted by name.
  */
 export async function listFiles(dirPath: string): Promise<string[]> {
   const expanded = expandHome(dirPath);
   if (!await fse.pathExists(expanded)) return [];
-  const entries = await fse.readdir(expanded, { withFileTypes: true });
+  const entries = await readdirSorted(expanded);
   return entries.filter(e => e.isFile()).map(e => e.name);
 }
 
 /**
  * List files recursively, returning relative paths (e.g. "sub/file.md").
+ * Each directory level is walked in name order, so the result is deterministic
+ * across filesystems.
  */
 export async function listFilesRecursive(dirPath: string): Promise<string[]> {
   const expanded = expandHome(dirPath);
@@ -308,7 +322,7 @@ export async function listFilesRecursive(dirPath: string): Promise<string[]> {
 }
 
 async function _walkFiles(base: string, prefix: string, results: string[]): Promise<void> {
-  const entries = await fse.readdir(path.join(base, prefix), { withFileTypes: true });
+  const entries = await readdirSorted(path.join(base, prefix));
   for (const entry of entries) {
     if (isIgnored(entry.name)) continue;
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name;

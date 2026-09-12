@@ -135,7 +135,7 @@ function makeTeamConfig() {
     repo: 'https://git.woa.com/test/repo.git',
     provider: 'tgit',
     reviewers: [],
-    sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '~/.teamai/docs' }, env: { injectShellProfile: true } },
+    sharing: { skills: {}, docs: { localDir: '~/.teamai/docs' }, env: { injectShellProfile: true } },
     toolPaths: {},
   };
 }
@@ -355,6 +355,87 @@ describe('push --skill flag', () => {
     expect(pushedItems[0].status).toBe('modified');
     expect(pushedItems[0].namespace).toBeUndefined();
     expect(pushedItems[0].relativePath).toBe('skills/flat-skill');
+  });
+
+  it('refuses a force-constructed skill whose name is ambiguous across team groups', async () => {
+    const path = await import('node:path');
+    const { log } = await import('../utils/logger.js');
+    const { resetReportedDuplicateSkills } = await import('../resources/skill-duplicates.js');
+    resetReportedDuplicateSkills();
+    process.exitCode = undefined;
+    const pushItem = vi.fn();
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: makeLocalConfig({ primaryRole: undefined }),
+      teamConfig: makeTeamConfig(),
+    });
+    mockGetHandler.mockImplementation(() => ({ scanLocalForPush: vi.fn().mockResolvedValue([]), pushItem }));
+    // Team repo has skills/a/x, skills/b/x and a flat skills/x. Build every
+    // path with the same path.join/path.resolve expressions push.ts uses, so
+    // the exact-string mock matches on any platform.
+    const userSkillDir = path.resolve('/home/user/.claude/skills/x');
+    const teamSkillsDir = path.join('/tmp/team-repo', 'skills');
+    const existing = [
+      userSkillDir,
+      path.join(userSkillDir, 'SKILL.md'),
+      teamSkillsDir,
+      path.join(teamSkillsDir, 'a', 'x'),
+      path.join(teamSkillsDir, 'b', 'x'),
+      path.join(teamSkillsDir, 'x'),
+      path.join(teamSkillsDir, 'x', 'SKILL.md'),
+    ];
+    mockPathExists.mockImplementation(async (p: unknown) =>
+      existing.includes(String(p)));
+    mockListDirs.mockResolvedValue(['b', 'x', 'a']);
+
+    const prevExitCode = process.exitCode;
+    try {
+      await push({ all: true, skill: userSkillDir });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = prevExitCode;
+    }
+
+    expect(pushItem).not.toHaveBeenCalled();
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate skill "x" found in "skills/a/x", "skills/b/x" and "skills/x"'),
+    );
+  });
+
+  it('refuses an ambiguous skill from the scan but still offers the other changes', async () => {
+    const { log } = await import('../utils/logger.js');
+    const pushedItems: Array<Record<string, unknown>> = [];
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: makeLocalConfig({ primaryRole: undefined }),
+      teamConfig: makeTeamConfig(),
+    });
+    // The skills scan refuses x itself: it reports the conflict, marks the
+    // run failed, and returns every other candidate.
+    const { reportDuplicateSkills, resetReportedDuplicateSkills } = await import('../resources/skill-duplicates.js');
+    resetReportedDuplicateSkills();
+    process.exitCode = undefined;
+    const scanSkills = vi.fn().mockImplementation(async () => {
+      reportDuplicateSkills([{ name: 'x', paths: ['skills/a/x', 'skills/b/x'] }]);
+      return [
+        { name: 'other', type: 'skills', sourcePath: '/home/user/.claude/skills/other', relativePath: 'skills/other', status: 'modified' },
+      ];
+    });
+    mockGetHandler.mockImplementation((type: string) => ({
+      scanLocalForPush: type === 'skills' ? scanSkills : vi.fn().mockResolvedValue([]),
+      pushItem: vi.fn().mockImplementation(async (item: Record<string, unknown>) => { pushedItems.push(item); }),
+    }));
+
+    const prevExitCode = process.exitCode;
+    try {
+      await push({ all: true });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = prevExitCode;
+    }
+
+    expect(pushedItems.map((i) => i.name)).toEqual(['other']);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining('Duplicate skill "x" found in "skills/a/x" and "skills/b/x"'),
+    );
   });
 
   it('exits with error when skill path does not exist', async () => {
