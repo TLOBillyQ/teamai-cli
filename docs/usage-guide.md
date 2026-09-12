@@ -394,7 +394,7 @@ teamai init . --agent claude,codex   # non-interactive: set up Claude Code + Cod
 
 **Choosing which AI tools to set up.** Single-repo mode creates a per-tool directory in your repo (e.g. `.claude/`, `.codex/`) — it seeds the skills dir, injects the teamai hooks, and commits that tool's settings to main so teammates get them on clone. You control which tools:
 
-- **`--agent <name...>`** — explicit list, repeatable or comma-separated: `--agent claude`, `--agent claude,codex`, `--agent claude --agent cursor`. Supported ids include `claude`, `codex`, `cursor`, `joycode`, `codebuddy`, `workbuddy`, and `dsh` (DeepSeek Harness).
+- **`--agent <name...>`** — explicit list, repeatable or comma-separated: `--agent claude`, `--agent claude,codex`, `--agent claude --agent cursor`. Supported ids include `claude`, `codex`, `cursor`, `joycode`, `codebuddy`, `workbuddy`, `kimi` (Kimi Code CLI), and `dsh` (DeepSeek Harness).
 - **Interactive (no `--agent`, a terminal)** — teamai shows a multi-select. Option 1 is **Auto**, which lists the AI tools already installed on your machine (`~/.claude`, `~/.codex`, …) and is the Enter default; the remaining options are the individual tools. Auto and specific tools can be combined.
 - **Non-interactive (no `--agent`, no terminal — CI, hooks, clone-time bootstrap)** — teamai mirrors the tools you already use under your home dir (`~/.claude`, `~/.codex`, …). If none are found, it creates nothing (you still get the knowledge; run `teamai init .` later to pick tools).
 
@@ -649,7 +649,7 @@ resolve: `teamai skill get team-wiki-codebase` serves `wiki`.
 
 `teamai init` already injected Hooks into your AI tools. **`teamai pull` runs automatically every time you start an AI session** — no manual action needed. In project scope, that SessionStart hook first creates the current agent's project root (e.g. `<project>/.claude` when Claude Code opens the repo) if it is missing, then pulls.
 
-*(Note: Automatic sync on session start requires an agent that supports lifecycle hooks, such as [CC], Codex, GitHub Copilot CLI, Cursor, CodeBuddy, WorkBuddy, Qoder, Kiro, OpenCode, Oh My Pi, Pi, Hermes, or OpenClaw. Kiro runs the hook when a TeamAI-rendered custom agent is activated in an interactive CLI session; its in-memory built-in default agent is not writable, and non-interactive mode does not fire `agentSpawn`. For tools without a teamai-writable hooks surface such as JoyCode or Gemini CLI, run `teamai pull` manually.)*
+*(Note: Automatic sync on session start requires an agent that supports lifecycle hooks, such as [CC], Codex, GitHub Copilot CLI, Cursor, CodeBuddy, WorkBuddy, Qoder, Kiro, OpenCode, Oh My Pi, Pi, Hermes, Kimi Code CLI, or OpenClaw. Kiro runs the hook when a TeamAI-rendered custom agent is activated in an interactive CLI session; its in-memory built-in default agent is not writable, and non-interactive mode does not fire `agentSpawn`. Kimi Code CLI hooks are always written to its user-level `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME/config.toml`) as `[[hooks]]` entries, even in project scope, because its project-level `local.toml` has no hooks support. Hook injection never creates that directory itself: if it does not exist yet (Kimi Code has never run on this machine), the hooks are skipped, and when kimi is enabled explicitly (`--agent kimi`), `teamai pull` / `teamai hooks inject` print `Kimi Code hooks skipped: <path> does not exist (run Kimi Code once, then re-run teamai pull)` and `teamai doctor` reports the missing hooks. For tools without a teamai-writable hooks surface such as JoyCode or Gemini CLI, run `teamai pull` manually.)*
 
 If you need to sync immediately, you can run it manually:
 
@@ -1865,6 +1865,17 @@ Team hooks still come from the team's `hooks/hooks.yaml`: edit that source in th
 - **Server-pushed agent hooks.** HTTP-source hooks are installed as `teamai-agent-<slug>.ts` extensions in the same global extension directory. Unsupported lifecycle events are skipped with a warning.
 - **MCP and subagents.** Pi has no adapter in this phase for MCP or TeamAI custom subagent files.
 
+### Kimi Code CLI
+
+Kimi Code CLI is a built-in target (`--agent kimi`), detected from `~/.kimi-code` like the other tools. Its project-level layout is scanned natively, but it has **no rules directory** and does not expand `@file` references in `AGENTS.md`, so teamai adapts:
+
+- **Skills** land in `.kimi-code/skills/` (Kimi scans it directly, alongside `.agents/skills/`).
+- **Subagents** are rendered into `.kimi-code/agents/*.md` using the [current Kimi Markdown format](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents): `name`, `description` and a YAML-list `tools` allowlist with case-sensitive names such as `Bash`, `Read`, `Grep`, and `Glob` (`Task` maps to `Agent`). Known legacy Python tool ids from previous TeamAI output are converted to current names on render and reverse sync; unknown names and MCP patterns such as `mcp__jira__*` remain unchanged. Explicit `tools: []` still disables all tools. The same conversion applies to `tools` and `disallowedTools` overrides in `tool_extras.kimi`. After upgrading TeamAI, run `teamai pull --force` to refresh existing built-in and team agents; repeat pulls retain the corrected names. This target supports current Markdown agents, not the legacy Python CLI's separate `version`/`agent` YAML format. The common `model` field is not emitted; Kimi-only fields (`whenToUse`, `disallowedTools`, `subagents`, `override`) round-trip through `tool_extras.kimi`.
+- **Rules** are **inlined** into a teamai-managed block (`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`) of `.kimi-code/AGENTS.md`, the one file Kimi injects into its system prompt. Rule frontmatter (`paths:` …) is stripped, so a path-scoped rule applies to every task in Kimi; your own content outside the block is preserved; the block is removed when the team's last rule goes away. Nothing is copied into `.kimi-code/rules/` because Kimi would never read it.
+- **Culture, shared instructions and the recall block** are injected into the same `.kimi-code/AGENTS.md` (the recall block and the built-in `teamai-recall` subagent only when recall is enabled, see `teamai recall status`). All of this only happens when `.kimi-code/` exists for the scope (or you enabled `kimi` explicitly) — teamai never creates it for someone who doesn't use Kimi.
+- **Hooks** live in the user-level `~/.kimi-code/config.toml` (see the hooks note above). If that directory does not exist yet, pull skips them (with a `Kimi Code hooks skipped: ...` warning when kimi is enabled) — run Kimi Code once, then pull again. `teamai doctor` checks that `config.toml` carries the teamai entries.
+>>>>>>> 337aa90 (feat(kimi): support Kimi Code CLI as a first-class target)
+
 ### Qoder
 
 Qoder is available as a built-in target. TeamAI deploys skills, rules, and subagents to `.qoder/skills/`, `.qoder/rules/`, and `.qoder/agents/`. Hooks and MCP servers are merged into the scope-specific `.qoder/settings.json`, preserving unrelated user settings. The paths match Qoder's user and project configuration contracts.
@@ -2516,6 +2527,10 @@ The tool directory does not exist, so every target was skipped. Pull names each 
 ```
 
 Fix it either by opening the tool once (it creates its own directory, then SessionStart pulls), or by enabling it explicitly - `teamai init --agent kimi` records the tool in `enabledAgents` and pull creates its directory from then on.
+
+**Q: `pull` warned `Kimi Code hooks skipped: ... does not exist`?**
+
+Kimi Code CLI reads hooks only from its user-level `config.toml` (`~/.kimi-code/`, or `$KIMI_CODE_HOME`), and that directory does not exist yet — typically in project scope, where pull only creates `<project>/.kimi-code/`. Start Kimi Code once so it creates its home, then run `teamai pull` (or `teamai hooks inject`). Once installed, `teamai doctor` shows `✔ teamai hooks in kimi config (...)`.
 
 **Q: `teamai init` reported that member registration was not pushed?**
 

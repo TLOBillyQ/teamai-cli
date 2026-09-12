@@ -3,6 +3,7 @@ import path from 'node:path';
 import { getHermesHome } from './hermes-home.js';
 import { readFileSafe, writeFile, ensureDir, remove, pathExists, readJson, writeJson } from './utils/fs.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from './types.js';
+import { mergeManagedBlock } from './utils/claudemd.js';
 
 /** Markers that delimit the teamai-managed block inside SOUL.md. */
 const RULES_BLOCK_START = TEAMAI_RULES_START;
@@ -43,62 +44,6 @@ async function writeConfigDoc(doc: YAML.Document.Parsed): Promise<void> {
 }
 
 /**
- * Replace or insert the teamai-managed block within an existing string.
- *
- * Rules:
- * - If rulesText is non-empty, block = START + newline + rulesText.trim() + newline + END.
- * - If rulesText is empty, block = '' (remove the managed section).
- * - If existing already contains both markers, replace the entire START..END span with block.
- * - Otherwise append block after existing (separated by a blank line when existing is non-empty).
- * - Returns a trimmed string; empty string when the result would be blank.
- */
-function mergeBlock(existing: string, rulesText: string): string {
-  const block =
-    rulesText.trim() !== ''
-      ? `${RULES_BLOCK_START}\n${rulesText.trim()}\n${RULES_BLOCK_END}`
-      : '';
-
-  const startIdx = existing.indexOf(RULES_BLOCK_START);
-  const endIdx = existing.indexOf(RULES_BLOCK_END);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    // Replace the existing managed block (inclusive of markers).
-    const before = existing.substring(0, startIdx).replace(/\n+$/, '');
-    const after = existing.substring(endIdx + RULES_BLOCK_END.length).replace(/^\n+/, '');
-
-    let result: string;
-    if (block === '') {
-      // Remove the managed block; stitch before and after.
-      if (before === '' && after === '') {
-        result = '';
-      } else if (before === '') {
-        result = after;
-      } else if (after === '') {
-        result = before;
-      } else {
-        result = `${before}\n\n${after}`;
-      }
-    } else {
-      if (before === '' && after === '') {
-        result = block;
-      } else if (before === '') {
-        result = `${block}\n\n${after}`;
-      } else if (after === '') {
-        result = `${before}\n\n${block}`;
-      } else {
-        result = `${before}\n\n${block}\n\n${after}`;
-      }
-    }
-    return result.trim();
-  }
-
-  // No existing managed block — append.
-  if (block === '') return existing.trim();
-  if (existing.trim() === '') return block;
-  return `${existing.trim()}\n\n${block}`;
-}
-
-/**
  * Merge the teamai-managed rules block into the Hermes SOUL.md file,
  * preserving any user-authored content outside the teamai markers.
  *
@@ -116,7 +61,7 @@ export async function upsertSoulRules(rulesText: string): Promise<void> {
     .join('\n');
   const filePath = getHermesSoulPath();
   const existing = (await readFileSafe(filePath)) ?? '';
-  const merged = mergeBlock(existing, sanitized);
+  const merged = mergeManagedBlock(existing, RULES_BLOCK_START, RULES_BLOCK_END, sanitized);
 
   if (merged === '') {
     if (await pathExists(filePath)) await remove(filePath);

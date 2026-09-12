@@ -27,6 +27,7 @@ import {
   reverseFromKiro,
   reverseFromOpencode,
   reverseFromWorkbuddy,
+  reverseFromKimi,
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
   AGENT_FILE_EXTENSIONS,
@@ -421,7 +422,10 @@ export class AgentsHandler extends ResourceHandler {
             toolFiles.delete(tool);
             continue;
           }
-          if (await readFileSafe(filePath) === renderForTool(canonicalSpec, tool).content) {
+          const content = await readFileSafe(filePath);
+          const reversed = tool === 'kimi' && content !== null ? reverseByTool(tool, filePath, content) : null;
+          if (content === null || content === renderForTool(canonicalSpec, tool).content
+            || (reversed?.ok && isDeepStrictEqual(reversed.spec, canonicalSpec))) {
             toolFiles.delete(tool);
           }
         }
@@ -669,6 +673,12 @@ export class AgentsHandler extends ResourceHandler {
         // and not ours to delete (#624 review).
         if (!isLegacyAgent(agentItem)) {
           await removeStaleAgentSiblings(destDir, item.name, render.ext);
+        }
+        if (tool === 'kimi' && !isLegacyAgent(agentItem)) {
+          const current = await readFileSafe(dest);
+          const canonical = parseAgentYaml(content, `${item.name}.yaml`);
+          const reversed = current === null ? null : reverseFromKimi(dest, current);
+          if (canonical.ok && reversed?.ok && isDeepStrictEqual(canonical.spec, reversed.spec)) continue;
         }
         await writeFile(dest, render.content);
         log.debug(`Rendered agent ${item.name} → ${tool} (${render.ext})`);
@@ -1138,5 +1148,7 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromOpencode(filePath, content);
     case 'workbuddy':
       return reverseFromWorkbuddy(filePath, content);
+    case 'kimi':
+      return reverseFromKimi(filePath, content);
   }
 }

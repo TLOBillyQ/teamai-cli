@@ -359,7 +359,7 @@ teamai init . --agent claude,codex   # 非交互：启用 Claude Code + Codex
 
 **选择启用哪些 AI 工具。** 单仓模式会在你的仓库里为每个工具创建一个目录（如 `.claude/`、`.codex/`）——建好 skills 目录、注入 teamai hooks，并把该工具的 settings 提交到 main，让队友 clone 后即可获得。由你决定启用哪些工具：
 
-- **`--agent <name...>`** —— 显式列表，可重复或逗号分隔：`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。常用 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`dsh`（DeepSeek Harness）。
+- **`--agent <name...>`** —— 显式列表，可重复或逗号分隔：`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。常用 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`kimi`（Kimi Code CLI）、`dsh`（DeepSeek Harness）。
 - **交互式（无 `--agent`、有终端）** —— teamai 弹出多选列表。第 1 项是 **Auto**，会列出你本机已安装的 AI 工具（`~/.claude`、`~/.codex`……）并作为回车默认项；其余各项是具体工具。Auto 与具体工具可以组合勾选。
 - **非交互（无 `--agent`、无终端 —— CI、hook、clone 时自愈 bootstrap）** —— teamai 会按你本机 home 目录下已装的工具（`~/.claude`、`~/.codex`……）来建。若一个都没检测到，则什么都不建（你仍拿到知识，可稍后运行 `teamai init .` 再选工具）。
 
@@ -577,7 +577,7 @@ teamai skill path wiki              # 打印打包目录，用于运行 skill �
 
 `teamai init` 时已注入 Hooks 到你的 AI 工具中。**每次启动 AI 会话时会自动执行 `teamai pull`**，无需手动操作。在 project scope 下，该 SessionStart hook 会先为当前 Agent 创建项目根目录（例如用 Claude Code 打开仓库时创建 `<project>/.claude`），然后再 pull。
 
-*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 [CC]、Codex、GitHub Copilot CLI、Cursor、CodeBuddy、WorkBuddy、Qoder、Kiro、OpenCode、Oh My Pi、Pi、Hermes、OpenClaw 等。Kiro 仅在交互式 CLI 会话激活由 TeamAI 渲染的自定义 agent 时触发该 Hook；其内存中的内置默认 agent 无法写入，非交互模式也不会触发 `agentSpawn`。对于暂无 teamai 可写入 Hooks 的工具（如 JoyCode、Gemini CLI 等），需手动执行 `teamai pull`。)*
+*(注：会话启动自动同步依赖工具的生命周期 Hooks 支持，如 [CC]、Codex、GitHub Copilot CLI、Cursor、CodeBuddy、WorkBuddy、Qoder、Kiro、OpenCode、Oh My Pi、Pi、Hermes、Kimi Code CLI、OpenClaw 等。Kiro 仅在交互式 CLI 会话激活由 TeamAI 渲染的自定义 agent 时触发该 Hook；其内存中的内置默认 agent 无法写入，非交互模式也不会触发 `agentSpawn`。Kimi Code CLI 的 Hooks 始终以 `[[hooks]]` 条目写入其用户级 `~/.kimi-code/config.toml`（或 `$KIMI_CODE_HOME/config.toml`），project scope 也不例外，因为其项目级 `local.toml` 不支持 hooks。注入 hooks 时不会自行创建该目录：若它尚不存在（本机从未运行过 Kimi Code），hooks 会被跳过；若显式启用了 kimi（`--agent kimi`），`teamai pull` / `teamai hooks inject` 就会输出 `Kimi Code hooks skipped: <path> does not exist (run Kimi Code once, then re-run teamai pull)`，`teamai doctor` 也会报告 hooks 缺失。对于暂无 teamai 可写入 Hooks 的工具（如 JoyCode、Gemini CLI 等），需手动执行 `teamai pull`。)*
 
 如果需要立即同步，可以手动执行：
 
@@ -1752,6 +1752,16 @@ GitHub Copilot CLI 已支持其官方自定义指令、Rules、Skills、自定�
 - **服务端下发的 Agent Hooks。** HTTP source hooks 会以同一用户级扩展目录中的 `teamai-agent-<slug>.ts` 形式安装。不支持的生命周期事件会警告并跳过。
 - **MCP 与 Subagents。** 本阶段没有为 Pi 接入 MCP 或 TeamAI 自定义 subagent 文件适配器。
 
+### Kimi Code CLI
+
+Kimi Code CLI 是内置目标（`--agent kimi`），与其他工具一样通过 `~/.kimi-code` 探测。它的项目级目录会被原生扫描，但它**没有 rules 目录**，且不会展开 `AGENTS.md` 里的 `@file` 引用，因此 teamai 做了适配：
+
+- **Skills** 落在 `.kimi-code/skills/`（Kimi 直接扫描该目录，以及 `.agents/skills/`）。
+- **Subagents** 使用[当前 Kimi Markdown 格式](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents)写入 `.kimi-code/agents/*.md`：`name`、`description` 和 YAML 列表形式的 `tools` 允许列表，工具名区分大小写，例如 `Bash`、`Read`、`Grep`、`Glob`（`Task` 映射为 `Agent`）。旧版 TeamAI 输出中已知的 Python 工具标识会在渲染和反向同步时转换为当前名称；未知名称及 `mcp__jira__*` 等 MCP 模式原样保留。显式 `tools: []` 仍禁用全部工具。`tool_extras.kimi` 中覆盖的 `tools` 和 `disallowedTools` 也执行相同转换。升级 TeamAI 后运行 `teamai pull --force`，即可刷新已有的内置和团队代理；重复 pull 会保留修正后的名称。此目标支持当前 Markdown 代理，不支持旧 Python CLI 独立的 `version`/`agent` YAML 格式。不输出通用 `model` 字段；Kimi 独有字段（`whenToUse`、`disallowedTools`、`subagents`、`override`）经由 `tool_extras.kimi` 往返。
+- **Rules** 会被**内联**进 `.kimi-code/AGENTS.md` 的 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`），这是 Kimi 唯一会注入系统提示的文件。规则的 frontmatter（`paths:` 等）会被去掉，因此按路径限定的规则在 Kimi 里对所有任务生效；区块之外你自己的内容保持不变；团队最后一条 rule 消失时区块随之移除。不会往 `.kimi-code/rules/` 拷任何文件，因为 Kimi 永远不会读它。
+- **Culture、共享指令和 recall 区块**同样注入这份 `.kimi-code/AGENTS.md`（recall 区块与内置 `teamai-recall` 子代理仅在 recall 启用时注入，见 `teamai recall status`）。以上都只在该作用域存在 `.kimi-code/`（或你显式启用了 `kimi`）时发生——teamai 绝不会为不用 Kimi 的人创建它。
+- **Hooks** 写在用户级 `~/.kimi-code/config.toml`（见上文 hooks 说明）。该目录尚不存在时，pull 会跳过（启用了 kimi 时输出 `Kimi Code hooks skipped: ...` 警告）——先运行一次 Kimi Code，再重新 pull 即可。`teamai doctor` 会检查 `config.toml` 中是否包含 teamai 条目。
+
 ### Qoder
 
 Qoder 已作为内置目标支持。TeamAI 会将 Skills、Rules 和 Subagents 分别下发到 `.qoder/skills/`、`.qoder/rules/` 和 `.qoder/agents/`。Hooks 与 MCP Server 会合并进对应作用域的 `.qoder/settings.json`，并保留用户已有的其他设置；这些路径与 Qoder 的用户级和项目级配置约定一致。
@@ -2351,6 +2361,10 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 ```
 
 两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents`，此后 pull 会为它创建目录。
+
+**Q: pull 提示 `Kimi Code hooks skipped: ... does not exist`？**
+
+Kimi Code CLI 只从用户级 `config.toml`（`~/.kimi-code/`，或 `$KIMI_CODE_HOME`）读取 hooks，而该目录尚不存在——多见于 project scope，此时 pull 只会创建 `<project>/.kimi-code/`。先启动一次 Kimi Code 让它创建自己的目录，再执行 `teamai pull`（或 `teamai hooks inject`）。安装成功后 `teamai doctor` 会显示 `✔ teamai hooks in kimi config (...)`。
 
 **Q: `teamai init` 报错说成员注册没有推送成功？**
 

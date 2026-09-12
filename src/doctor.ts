@@ -14,6 +14,7 @@ import {
   resolveToolBaseDir,
   isAgentExcluded,
   scopedToolPaths,
+  isAgentDisabled,
   type LocalConfig,
   type TeamaiConfig,
 } from './types.js';
@@ -283,6 +284,31 @@ async function buildHookChecks(
 
 
 /**
+ * Kimi Code keeps its hooks in the user-level config.toml rather than a
+ * toolPaths settings file, so buildHookChecks never sees it. Check it when kimi
+ * is enabled explicitly or its home exists, because pull only warns about a
+ * missing kimi home and moves on (issue #12).
+ */
+async function buildKimiHookChecks(
+  toolPaths: TeamaiConfig['toolPaths'],
+  localConfig: LocalConfig | null,
+): Promise<Check[]> {
+  if (!('kimi' in toolPaths)) return [];
+  if (localConfig && isAgentDisabled(localConfig, 'kimi')) return [];
+  const { getKimiHome, getKimiConfigPath, hasKimiTeamaiHooks } = await import('./kimi-hooks.js');
+  const kimiHome = getKimiHome();
+  const homeExists = await pathExists(kimiHome);
+  if (!homeExists && !localConfig?.enabledAgents?.includes('kimi')) return [];
+  return [{
+    name: `teamai hooks in kimi config (${getKimiConfigPath()})`,
+    check: hasKimiTeamaiHooks,
+    fix: homeExists
+      ? 'Run `teamai hooks inject` to inject/update hooks'
+      : `Run Kimi Code once to create ${kimiHome}, then run \`teamai hooks inject\``,
+  }];
+}
+
+/**
  * True if a trust-gated Codex tool (the public `codex`) already has teamai hooks
  * installed on disk (settings file exists and contains the hook-dispatch
  * command). Used to emit a lightweight reminder that Codex may still require the
@@ -449,6 +475,7 @@ export async function buildChecks(ctx: DoctorContext, stage: CheckStage = 'docto
       },
       fix: 'Check teamai.yaml in team repo for syntax errors',
     },
+    ...await buildKimiHookChecks(toolPaths, localConfig),
     {
       // A contribution is kept locally when it cannot be published. Without
       // this check a member whose pushes are rejected queues notes forever and

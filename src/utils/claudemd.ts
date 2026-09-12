@@ -54,3 +54,35 @@ export async function removeClaudeMdSection(
     const after = existing.substring(endIdx + endMarker.length).replace(/^\n+/, '\n');
     await writeFile(filePath, (before + after).trimEnd() + '\n');
 }
+
+/**
+ * Replace, insert, or remove a marker-delimited managed block inside a string.
+ *
+ * Unlike injectClaudeMdSection this is pure and can *remove* the block: an
+ * empty `body` deletes the START..END span (markers included) and stitches the
+ * surrounding user content back together. A non-empty body is wrapped in the
+ * markers and either replaces the existing span or is appended after the
+ * existing content. Returns a trimmed string; '' when the result would be blank.
+ */
+export function mergeManagedBlock(
+    existing: string,
+    startMarker: string,
+    endMarker: string,
+    body: string,
+): string {
+    const block = body.trim() !== '' ? `${startMarker}\n${body.trim()}\n${endMarker}` : '';
+
+    const startIdx = existing.indexOf(startMarker);
+    const endIdx = existing.indexOf(endMarker);
+
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        const before = existing.substring(0, startIdx).replace(/\n+$/, '');
+        const after = existing.substring(endIdx + endMarker.length).replace(/^\n+/, '');
+        const parts = [before, block, after].filter((p) => p !== '');
+        return parts.join('\n\n').trim();
+    }
+
+    if (block === '') return existing.trim();
+    if (existing.trim() === '') return block;
+    return `${existing.trim()}\n\n${block}`;
+}
