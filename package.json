@@ -1,5 +1,5 @@
 {
-  "name": "teamai-cli",
+  "name": "@agent/teamai-cli",
   "version": "0.22.0",
   "description": "TeamAI — Make Every Team AI Native (skill sync + shared knowledge base, powered by Git)",
   "type": "module",
@@ -18,7 +18,8 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "http://lzxsvn:3000/api/packages/agent/npm/"
   },
   "scripts": {
     "build": "tsup",

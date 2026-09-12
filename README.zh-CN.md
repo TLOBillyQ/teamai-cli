@@ -91,7 +91,7 @@ npm install -g @agent/teamai-cli
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/your-org/your-repo`。
+在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init http://lzxsvn:3000/agent/yourrepo`。
 
 > **Gitea：**`teamai init` 前先设置 `GITEA_TOKEN`（Gitea access token）。管理员首次 init 还需设置 `GITEA_URL`（如 `http://lzxsvn:3000`），新生成的 `teamai.yaml` 才会记下 `provider: gitea`。此后成员可以不设 `GITEA_URL`：init 会读取仓库声明的 provider，并从仓库 URL 取 Gitea 实例地址。token 缺失或无效时 init 直接报错退出，不会用 Git `user.name` 注册成员。
 
@@ -107,10 +107,10 @@ export GITEA_TOKEN=<your-gitea-token>
 
 # 项目级初始化（默认，资源安装到项目目录下）
 cd /path/to/my-project
-teamai init https://github.com/your-org/your-repo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
 # 或者，用户级初始化（资源安装到 ~/ 下）
-teamai init https://github.com/your-org/your-repo --scope user
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 初始化完成后，每次开启 AI 会话时都会自动拉取管理员发布的 skills / rules 等 Harness 更新，无需手动同步。

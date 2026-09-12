@@ -29,6 +29,7 @@
 - [Advanced Features](#advanced-features)
 - [Command Reference](#command-reference)
 - [Configuration Reference](#configuration-reference)
+  - [Managed block markers](#managed-block-markers)
 - [Uninstall](#uninstall)
 - [FAQ](#faq)
 
@@ -397,6 +398,8 @@ teamai init . --agent claude,codex   # non-interactive: set up Claude Code + Cod
 - **`--agent <name...>`** — explicit list, repeatable or comma-separated: `--agent claude`, `--agent claude,codex`, `--agent claude --agent cursor`. Supported ids include `claude`, `codex`, `cursor`, `joycode`, `codebuddy`, `workbuddy`, `kimi` (Kimi Code CLI), and `dsh` (DeepSeek Harness).
 - **Interactive (no `--agent`, a terminal)** — teamai shows a multi-select. Option 1 is **Auto**, which lists the AI tools already installed on your machine (`~/.claude`, `~/.codex`, …) and is the Enter default; the remaining options are the individual tools. Auto and specific tools can be combined.
 - **Non-interactive (no `--agent`, no terminal — CI, hooks, clone-time bootstrap)** — teamai mirrors the tools you already use under your home dir (`~/.claude`, `~/.codex`, …). If none are found, it creates nothing (you still get the knowledge; run `teamai init .` later to pick tools).
+
+Auto-detection — both the picker's **Auto** option and non-interactive probing — only covers the common coding tools (`claude`, `codex`, `cursor`, `joycode`, `codebuddy`, `workbuddy`, `kimi`). Other supported tools are never auto-detected; enable them explicitly, e.g. `--agent dsh` for DeepSeek Harness.
 
 **How it splits data across branches:**
 
@@ -2349,6 +2352,25 @@ Notify external endpoints when team events happen. Each endpoint declares a `url
 
 **Signature.** When `secret` is set, each request carries `X-TeamAI-Signature: sha256=<hmac>`, an HMAC-SHA256 computed over the exact request body — so a receiver can verify authenticity. `teamai webhook list` and `teamai webhook test` inspect and exercise configured endpoints.
 
+### Managed block markers
+
+teamai writes into a few files you also own (tool instruction files and your shell profile) and always keeps its content between a fixed start/end marker pair. The block is regenerated on every sync, so don't edit inside it; content outside the markers is left untouched, and `teamai uninstall` removes only the blocks. Acceptance or health-check scripts should match these exact strings.
+
+Paths are relative to the project root in project scope and to your home directory in user scope. A tool's *instructions file* is its `claudemd` path in `toolPaths`: `.claude/CLAUDE.md` (`claude`), `.claude-internal/CLAUDE.md` (`claude-internal`), `.tclaude/CLAUDE.md` (`tclaude`), `.codebuddy/CODEBUDDY.md` (`codebuddy`), `.kimi-code/AGENTS.md` (`kimi`), `.openclaw/workspace/AGENTS.md` (`openclaw`), `AGENTS.md` (`hermes`, `workbuddy`). Tools without one (such as `codex`, `cursor`, `opencode`, `qoder`, `joycode`) get no instructions-file blocks. A tool only gets these blocks once its own directory exists (for example `.claude/` or `.kimi-code/`). The exception is `hermes`, which isn't gated, so the culture and shared-instructions blocks are always written to the root `AGENTS.md`.
+
+| Marker (start / end) | Written to | When | Constant (`src/types.ts`) |
+| --- | --- | --- | --- |
+| `<!-- [teamai:rules:start] -->` / `<!-- [teamai:rules:end] -->` | `kimi`: `.kimi-code/AGENTS.md`. `hermes`: `SOUL.md` under `$HERMES_HOME` (default `~/.hermes/SOUL.md`) | `pull` inlines every team rule body, because these tools have no rules directory. Removed when the team's last rule goes away | `TEAMAI_RULES_START` / `TEAMAI_RULES_END` |
+| `<!-- [teamai:culture:start] -->` / `<!-- [teamai:culture:end] -->` | Each tool's instructions file | `pull`, when the team repo has `culture.md` (see [Team Culture](#team-culture)) | `TEAMAI_CULTURE_START` / `TEAMAI_CULTURE_END` |
+| `<!-- [teamai:claudemd:start] -->` / `<!-- [teamai:claudemd:end] -->` | Each tool's instructions file | `pull`, when the team repo has shared instructions under `claudemd/` for your active namespaces | `TEAMAI_CLAUDEMD_START` / `TEAMAI_CLAUDEMD_END` |
+| `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | Instructions file of tools that also have subagents: `claude`, `claude-internal`, `tclaude`, `codebuddy`, `kimi` | `pull` and `teamai recall enable`, while recall is enabled (off by default; turn it on with `sharing.recall.enabled` or `teamai recall enable`); `teamai recall disable` removes it. Tells the main conversation to call the `teamai-recall` subagent | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
+| `# [teamai:env:start]` / `# [teamai:env:end]` | Shell profile: `sharing.env.shellProfilePath` if set, otherwise `~/.zshrc` when `$SHELL` is zsh, else `~/.bashrc` | `pull`, when the team repo defines env variables and `sharing.env.injectShellProfile` is not `false`. The block only sources teamai's `env.sh` | `TEAMAI_ENV_START` / `TEAMAI_ENV_END` |
+| `--- [teamai:recall:start] ---` / `--- [teamai:recall:end] ---` | **Never written to a file.** Printed to stdout by `teamai recall` | Every `teamai recall` run. The start line is followed by the result count, e.g. `--- [teamai:recall:start] --- (3 results)` | `TEAMAI_RECALL_OUTPUT_START` / `TEAMAI_RECALL_OUTPUT_END` |
+
+> **`recall` vs `recall-rules`:** the two differ by one suffix but are unrelated. To check that recall is installed for a tool, look for `<!-- [teamai:recall-rules:start] -->` in its instructions file. `[teamai:recall:start]` only appears in `teamai recall` output (and in agent transcripts that captured that output), so grepping `CLAUDE.md` or `AGENTS.md` for it always fails.
+
+If only one marker of a pair is left in a file (for example after a hand edit), the next sync can't find the block and appends a fresh one instead of replacing it. Delete both markers or neither.
+
 ---
 
 ## Model profiles
@@ -2508,7 +2530,7 @@ teamai uninstall --agent claude
 What gets removed:
 - TeamAI-managed model settings are restored first when ownership is still intact
 - teamai hooks in AI tool settings
-- The teamai rules block in CLAUDE.md (your own content is preserved)
+- The teamai managed blocks in tool instruction files such as CLAUDE.md / AGENTS.md (see [Managed block markers](#managed-block-markers); your own content is preserved)
 - Team-synced skills, including OpenClaw workspace skills (your own skills are preserved)
 - Team-synced rules
 - Team-synced custom agents and CLI built-in agents (your own agents are preserved)

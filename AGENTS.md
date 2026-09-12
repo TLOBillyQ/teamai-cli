@@ -7,8 +7,10 @@ TypeScript, Node 20+ (`npm run lint` needs ^20.19 or >=22.12), tsup (ESM), Vites
 ## Git
 
 - Default branch: `main`. Worktrees and PRs based on `origin/main`.
-- PR only to `Tencent/teamai-cli`. Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
+- PR 只提到 Gitea fork（`origin` = `agent/teamai-cli`），**不向 GitHub 上游（`Tencent/teamai-cli`）提 PR**。Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
 - **必须使用 Worktree**：改代码前先 `EnterWorktree`，禁止在主工作目录修改。
+- **本 fork 的提交历史**（`origin` = `agent/teamai-cli`，`upstream` = `Tencent/teamai-cli`）：qinyuanj / 覃远杰 的改动始终以一组精简的、按主题整合的提交 **rebase 在 `upstream/main` 之上**，不 merge 上游、不留 merge commit，方便后续更新上游。同一主题的后续修改 fixup 进已有提交（`git commit --fixup` + `git rebase -i --autosquash upstream/main`），不追加零碎提交；已并入上游的 cherry-pick 在 rebase 时直接丢掉。更新上游：`git fetch upstream && git rebase upstream/main`，跑完 `npm run build` / `npx tsc --noEmit` / `npx vitest run` 后 `git push --force-with-lease origin main`；改写前先打 `backup/*` 分支。
+- **本 fork 的发布**（`@agent/teamai-cli`，Gitea registry）：正好基于上游 release 构建时沿用其版本号（如 `0.24.0`）；两次上游 release 之间的 Gitea 版本用下一个 patch 加 `-gitea.N`（如 `0.24.1-gitea.0`）。发布提交打 annotated tag `gitea-v<version>`，不用 `v*`，避免和上游 tag 撞名。发布前确认 tag 所指提交的 `npm run build` 产物与要发布的包一致。
 
 ## Rules
 
@@ -70,3 +72,17 @@ shared state, list every reader and every writer.
   `[P2 non-blocking]` for suggestions that do not block merge, and `[P3 nit]`
   for minor or optional polish, theoretical edge cases, and coverage deferred
   to CI. (In Chinese, `[P1 阻断]` / `[P2 非阻断]` / `[P3 可选]`.)
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked on the Gitea fork (`agent/teamai-cli` at http://lzxsvn:3000) via the `tea` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `bug` / `enhancement` (categories) plus `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
