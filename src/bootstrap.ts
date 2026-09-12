@@ -264,8 +264,8 @@ export async function bootstrapSelfRepo(
     // Seed the tool skills-dir so hooks + skills inject on this fresh clone
     // (isToolInstalled would otherwise skip everything — no <repo>/.claude yet).
     try {
-      const { seedSelfModeToolDirs } = await import('./known-agents.js');
-      await seedSelfModeToolDirs(localConfig, teamConfig);
+      const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+      await ensureEnabledAgentDirs(localConfig, teamConfig);
     } catch (e) {
       log.debug(`[bootstrap] tool-dir seeding skipped: ${(e as Error).message}`);
     }
@@ -296,10 +296,13 @@ export async function bootstrapSelfRepo(
         // Absorb the member's pre-switch file from the clone (inherited root):
         // its displayName/registeredAt/projects survive the re-registration.
         const inherited = await getMemberConfig(localConfig.repo.localPath, username);
-        const config = inherited
-          ? mergeMemberConfig(inherited, { username }).config
-          : { username, displayName: username, registeredAt: new Date().toISOString() };
-        await writeFile(memberPath, YAML.stringify(config));
+        if (inherited) {
+          const config = mergeMemberConfig(inherited, { username }).config;
+          await writeFile(memberPath, YAML.stringify(config));
+        } else {
+          const { buildMemberYaml } = await import('./members.js');
+          await writeFile(memberPath, buildMemberYaml(username));
+        }
         return { files: ['members/'], message: `[teamai] Register member: ${username}` };
       });
     } catch (e) {

@@ -99,7 +99,7 @@ teamai --version
 
 > 只需一位管理员完成，其他成员跳到[成员接入](#成员接入)。
 
-在 GitHub、GitLab（gitlab.com 或自建实例）、GitCode（gitcode.com）、CNB（cnb.cool）、TGit，或任意私有/自建 Git 服务上创建一个空仓库（命名建议：`TeamAi-<团队名>`）。对于支持自动建仓的 provider，也可直接执行 `teamai init`，按提示创建尚不存在的仓库。
+在 GitHub、GitLab（gitlab.com 或自建实例）、GitCode（gitcode.com）、CNB（cnb.cool）、TGit、Gitea（仅自建；首次 `teamai init` 需配置 `GITEA_URL` 和 `GITEA_TOKEN`，生成的 `teamai.yaml` 才会记下 `provider: gitea`），或任意私有/自建 Git 服务上创建一个空仓库（命名建议：`TeamAi-<团队名>`）。对于支持自动建仓的 provider，也可直接执行 `teamai init`，按提示创建尚不存在的仓库。
 
 > **CNB 例外：** `cnb login` 令牌既不能建组织（`group-manage:rw`）也不能建仓库（`group-resource:rw`），`init` 会改为打印网页链接引导你创建后重新运行——组织不存在用 `https://cnb.cool/new/groups`，无权限建仓库用 `https://cnb.cool/new/repos`；如需 CLI 直接创建，请改用带这些权限的 `CNB_TOKEN` access token。
 
@@ -159,7 +159,11 @@ teamai init https://github.com/yourorg/yourrepo
 `teamai pull` 会覆盖这些文件：如有修改，请先另存一份，再在该 worktree 中执行 `teamai pull`，放回修改后重新 push。各 Agent 的项目根目录
 （`.claude/`、`.cursor/`、`.codebuddy/` 等）仍在工作区内、于 **SessionStart** 时按刚打开的
 工具创建。例如，打开 Claude Code 时会创建 `.claude/`，再由 pull 写入。单独执行 `teamai pull`
-仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录。
+仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录；唯一的例外
+是你显式启用过的工具（`teamai init --agent <id>`，或 `teamai init .` 的多选），pull 会为它创建目录，
+确保 skills 真正落盘。被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
+一个都没装上或加了 `--verbose` 时，逐个列出缺失的确切路径，例如
+`kimi: skipped - <project>/.kimi-code not found`。
 
 > **从旧版 teamai 升级？** 升级后首次执行 `teamai init` / `pull` / `push` / `contribute`
 > （或 `import --from-mr`）会自动把已有的
@@ -436,7 +440,7 @@ main 的团队知识 —— `git status` 保持干净。旧版单仓装升级后
 
 **管理员在 `teamai init .` 之后的清单：**
 
-1. `teamai init .` 已经帮你把 `.teamai/`（skills、rules、docs、空的 `learnings/`、`teamai.yaml`、`.gitignore`）以及每个所选工具的 settings（如 `.claude/settings.json`、`.codex/hooks.json`）提交到当前分支。贡献的内容不在其中：`teamai contribute` 会把它们推送到 `teamai-learnings` 分支。
+1. `teamai init .` 已经帮你把 `.teamai/`（skills、rules、docs、空的 `learnings/`、`teamai.yaml`、`.gitignore`）以及每个所选工具的 settings（如 `.claude/settings.json`、`.codex/hooks.json`）提交到当前分支。贡献的内容不在其中：`teamai contribute` 会把它们推送到 `teamai-learnings` 分支。如果没有配置 Git 身份，init 会跳过这次提交并给出提示；配置好 `user.name` / `user.email` 后自行提交这些路径即可。
 2. 推送 main，供团队成员 clone。
 3. 之后新增资源用 `teamai push` —— 它会（通过隔离 worktree）向你的仓库开 PR，而不是直接改动你的工作区。单仓模式下，你既可以在 AI 工具目录（如 `~/.claude/skills/`）里编写，**也可以**直接把资源放进仓库里的 `.teamai/`：
    - `.teamai/skills/` —— 团队 skills
@@ -505,6 +509,15 @@ teamai init https://gitlab.example.com/yourgroup/yourrepo --provider git
 - `pull` 照常工作。`push` 会推送分支，但无法创建 PR/MR，需要到 Git 平台上手动创建；由于这一步没有完成，命令以非零退出码结束。
 - 不带 `--provider` 重新运行 `teamai init` 即恢复自动检测。
 
+**Gitea 团队仓库：**
+
+```bash
+export GITEA_TOKEN=<your-gitea-token>   # Gitea → 设置 → 应用 → 生成令牌
+teamai init http://gitea.example.com:3000/yourorg/yourrepo
+```
+
+团队仓 `teamai.yaml` 声明了 `provider: gitea` 时，`teamai init`（以及单仓模式的 `teamai init .`）会用 Gitea 认证，并按你的 Gitea 登录名注册成员。Gitea 实例地址取自仓库 URL 的 scheme、host 和端口，因此 `GITEA_URL` 可以不设：设置了则以它为准，只有 SSH 形式的仓库 URL 才必须设置。token 缺失或无效时 init 直接报错退出，不写成员文件和本地配置，不会退回用 git `user.name` 注册。
+
 **HTTP 模式（只读消费者）：**
 
 无需 git 访问、仅消费 skills/rules 的用户或 agent：
@@ -523,6 +536,7 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # 查看状态
 teamai members                      # 查看团队成员
+teamai members register             # 把自己注册为成员（幂等；重试 init 未完成的注册）
 teamai list                         # 全部资源类型（skills|rules|docs|env|agents|hooks|mcp）+ 本地 skills
 teamai list mcp                     # 只看团队 MCP servers
 teamai list --source repo           # 只看团队仓库
@@ -2317,7 +2331,7 @@ teamai pull
 
 **Q: `teamai init` 提示已初始化？**
 
-交互模式下会提示是否覆盖，输入 `y` 即可。也可用 `--force` 跳过确认：
+交互模式下会提示是否覆盖，输入 `y` 即可。如果只是想补一次成员注册，直接执行 `teamai members register`，不必重新 init。也可用 `--force` 跳过确认：
 
 ```bash
 teamai init --repo https://github.com/yourorg/yourrepo --force
@@ -2326,6 +2340,34 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 **Q: 在项目里执行 `teamai init` 后没有 `.claude/`（或 `.cursor/`、`.codebuddy/`）目录？**
 
 这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录。
+
+**Q: pull 显示 "Synced N skills"，但实际什么都没装上？**
+
+说明工具目录不存在，所有 target 都被跳过了。pull 会逐个列出原因：
+
+```
+[project] kimi: skipped - D:\work\myrepo\.kimi-code not found
+[project] No AI tool directories found under D:\work\myrepo - nothing was installed.
+```
+
+两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents`，此后 pull 会为它创建目录。
+
+**Q: `teamai init` 报错说成员注册没有推送成功？**
+
+配置已经写好、可以正常使用，但你还没出现在 `teamai members` 里。init 会以错误样式输出原因，并以非 0 退出码结束，便于安装脚本发现。
+
+如果原因是 `Git identity is not configured`，说明 init 在提交前做了检查（和 `teamai members register` 的检查是同一个），你的成员文件既没有写入也没有推送。先配置 Git 身份：
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+否则通常是没有网络或对团队仓库没有写权限。修好原因后只补注册即可，无需重新 init：
+
+```bash
+teamai members register
+```
 
 **Q: Hooks 没有自动触发？**
 

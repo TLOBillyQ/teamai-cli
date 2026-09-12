@@ -1,6 +1,6 @@
 # Git Provider 说明
 
-TeamAI CLI 通过 provider 抽象层支持多个 Git 托管平台。当前实现了六个：
+TeamAI CLI 通过 provider 抽象层支持多个 Git 托管平台。当前实现了七个：
 
 | Provider | Host            | 认证方式                            | 建议场景              |
 |----------|-----------------|--------------------------------------|----------------------|
@@ -9,7 +9,8 @@ TeamAI CLI 通过 provider 抽象层支持多个 Git 托管平台。当前实现
 | `cnb`    | cnb.cool        | `cnb login` 或 `CNB_TOKEN` 环境变量  | CNB（云原生构建）用户 |
 | `gitlab` | gitlab.com 或自托管实例 | `GITLAB_TOKEN` 环境变量              | GitLab / 企业自托管   |
 | `gitcode`| gitcode.com     | `GITCODE_TOKEN` 环境变量或 init 交互粘贴 | GitCode（CSDN）用户 |
-| `git`    | 任意 Git host   | 系统 Git Credential Helper 或 SSH Key | 自建 Gitea 等其他平台 |
+| `gitea`  | 自托管实例（无公有云） | `GITEA_TOKEN` 环境变量（`GITEA_URL` 见下文） | 自建 Gitea            |
+| `git`    | 任意 Git host   | 系统 Git Credential Helper 或 SSH Key | 其他自建平台（仅传输）|
 
 ## Provider 自动检测
 
@@ -27,17 +28,19 @@ https://gitlab.com/org/repo(.git)       → gitlab
 git@gitlab.com:org/repo.git             → gitlab
 https://gitcode.com/org/repo(.git)      → gitcode
 git@gitcode.com:org/repo.git            → gitcode
+https://gitea.example.com/org/repo.git  → gitea（需先配置 GITEA_URL）
+git@gitea.example.com:org/repo.git      → gitea（需先配置 GITEA_URL）
 https://git.example.com/group/repo.git  → 检查 GitLab，未确认则 git
 git@git.example.com:group/repo.git      → 检查 GitLab，未确认则 git
 ```
 
 已知 host 和显式配置的 GitLab 实例优先。对于未知 host，`init` 会匿名探测 GitLab 登录页；确认是未配置的 GitLab 实例时，先提示设置 `GITLAB_URL` 和 `GITLAB_TOKEN` 后重试，不会直接把探测结果写入配置。未确认则继续使用 `git`。
 
-初始化成功后，provider 选择会写入 team 仓库的 `teamai.yaml` 的 `provider` 字段，后续 `push` / `pull` 都按这个值来；成员用 `--provider` 保存在本机的选择优先于它（见下节）。探测不会自动修改已有的 provider。
+初始化成功后，provider 选择会写入 team 仓库的 `teamai.yaml` 的 `provider` 字段，后续 `push` / `pull` 都按这个值来；成员用 `--provider` 保存在本机的选择优先于它（见下节）。探测不会自动修改已有的 provider。`teamai init` 在拿到团队仓后也会读取这个字段：检测结果是 `git`、而 `teamai.yaml` 声明 `provider: gitea` 时，改用 Gitea 认证（见 [Gitea Provider](#gitea-provider仅自托管)）。
 
 ### 手动指定 provider（`--provider`）
 
-`teamai init <input> --provider <name>` 跳过上面的自动检测（包括 GitLab 探测），直接使用指定的 provider，取值与 `teamai.yaml` 的 `provider` 相同：`tgit`、`github`、`cnb`、`gitlab`、`gitcode`、`git`。典型用法是团队仓库在自建 GitLab 上、但成员只需要普通 Git：`--provider git` 不做平台登录、不检查 `GITLAB_TOKEN`，clone/pull/push 走已有的 Git 凭据。
+`teamai init <input> --provider <name>` 跳过上面的自动检测（包括 GitLab 探测），直接使用指定的 provider，取值与 `teamai.yaml` 的 `provider` 相同：`tgit`、`github`、`cnb`、`gitlab`、`gitcode`、`gitea`、`git`。典型用法是团队仓库在自建 GitLab 上、但成员只需要普通 Git：`--provider git` 不做平台登录、不检查 `GITLAB_TOKEN`，clone/pull/push 走已有的 Git 凭据。
 
 该选择写入成员本机的本地配置（`provider` 字段），只影响这台机器：创建 PR/MR（`push`、`remove` 等）和 `doctor` 的 provider 检查优先使用它，已有的 `teamai.yaml` 不变。`init` 新建 `teamai.yaml`（空仓库，或单仓库模式首次初始化）时，`--provider git` 写入的仍是不带该参数时检测到的 provider（包括 GitLab 探测）；探测到尚未配置的自建 GitLab 时 `init` 会停止并提示设置 `GITLAB_URL`，不会把 `git` 写成团队默认值。其他值按指定值写入。不带 `--provider` 重新运行 `init` 即恢复自动检测。
 
@@ -49,13 +52,15 @@ git@git.example.com:group/repo.git      → 检查 GitLab，未确认则 git
 
 ```bash
 teamai init https://code.qschou.com/Enterprise/arb-workflow-kit.git --scope user
+# 内网 HTTP-only 服务同样可用，scheme 原样保留、不会被升级为 https
+teamai init http://code.internal:3000/team/skills.git --scope user
 # 或使用 SSH
 teamai init git@code.qschou.com:Enterprise/arb-workflow-kit.git --scope user
 ```
 
 通用 provider 不读取或保存平台 Token，而是让系统 `git` 处理认证：
 
-- HTTPS：预先配置 Git Credential Helper；不要把用户名、密码或 Token 写进 URL。
+- HTTP(S)：预先配置 Git Credential Helper；不要把用户名、密码或 Token 写进 URL。明文 HTTP 不加密传输，仅建议在可信内网使用。
 - SSH：预先配置 SSH Key，并确保 `ssh-agent` 能访问私钥。
 
 `teamai init .` 是一个受限例外：它只读取当前业务仓已经配置的 `origin`。若该 origin 是遗留的 HTTP Basic URL（例如 `http://user:token@host/group/repo.git`），初始化会使用其 host/path 识别仓库，但会在写入 `.teamai/teamai.yaml`、本地 TeamAI 配置和日志前移除用户名与 Token。普通 `teamai init <url>`、clone 和其他通用 Git URL 输入仍拒绝 HTTP 与 URL 内嵌凭据。HTTP 本身不会加密 Git 传输；应尽快迁移到 HTTPS + Credential Helper 或 SSH。
@@ -248,7 +253,7 @@ export GITLAB_TOKEN=glpat-xxx
 
 ### 与 `git` 通用 Provider 的分工
 
-检测顺序是 **已知 host → 显式配置的自托管 GitLab → 匿名 GitLab 探测 → `git` 通用回落**。匿名探测只用于 `init` 的配置提示，以及通用 provider 创建 PR 失败后的诊断，只确认具有明确特征的 GitLab 页面，不会自动配置实例或 token。未确认的 host 使用 `git` 通用 Provider，clone/pull/push 走系统 Git 凭据，自动建仓和创建 MR 则不受支持。配置好 GitLab Provider 后，才可使用建仓、建 MR、拉 MR 数据、列 group 仓库等平台能力。
+检测顺序是 **已知 host → 显式配置的自托管 GitLab → 显式配置的自托管 Gitea → 匿名 GitLab 探测 → `git` 通用回落**。匿名探测只用于 `init` 的配置提示，以及通用 provider 创建 PR 失败后的诊断，只确认具有明确特征的 GitLab 页面，不会自动配置实例或 token。未确认的 host 使用 `git` 通用 Provider，clone/pull/push 走系统 Git 凭据，自动建仓和创建 MR 则不受支持。配置好 GitLab Provider 后，才可使用建仓、建 MR、拉 MR 数据、列 group 仓库等平台能力。
 
 ### 多级命名空间
 
@@ -320,9 +325,71 @@ GitCode 命名空间为单层（用户或组织），仓库地址形如 `owner/r
 
 GitCode 不设默认 email 域，使用用户的 git 全局配置。
 
+## Gitea Provider（仅自托管）
+
+Gitea Provider 通过 Gitea **REST API v1**（`<base>/api/v1`）工作，**不需要任何外部 CLI**——只依赖一个 Access Token。结构上参照 GitLab Provider，但 API 形状接近 GitHub。
+
+### 认证配置
+
+```bash
+export GITEA_URL=https://gitea.example.com     # 实例 base URL（init 例外见下文）
+export GITEA_TOKEN=xxxxxxxxxxxxxxxxxxxx        # Access Token，需要 repo scope
+```
+
+在 Gitea → 设置 / Settings → 应用 / Applications → 生成令牌 处创建 token。
+
+token 变量支持三个名字（按优先级）：`GITEA_TOKEN` > `GITEA_ACCESS_TOKEN` > `GITEA_PAT`。空值/纯空白视为未设置，会继续尝试下一个别名。
+
+**`GITEA_URL` 没有默认值。** Gitea 没有公有云旗舰实例，因此未配置时不会像 GitLab 那样回落到某个公共 host，而是直接报错——静默猜一个 host 只会让请求发往错误的地方。唯一的例外是 `teamai init`：团队仓 `teamai.yaml` 声明了 `provider: gitea` 时，API 地址取自团队仓 URL 本身（见下方「自动检测」）。其余 Gitea API 操作（如 `teamai push` 自动创建 PR）仍需要 `GITEA_URL`。`GITEA_URL` 必须带 scheme（`https://` 或 `http://`），写成 `gitea.example.com` 会报错退出。
+
+`TEAMAI_GITEA_HOST` 可以单独覆盖 host（用于自动检测），但它不含 scheme，**不足以支撑 API 调用**；只设它而不设 `GITEA_URL` 时，任何 API 操作都会提示补上 `GITEA_URL`。
+
+### 自动检测
+
+- URL host 与 `GITEA_URL`（或 `TEAMAI_GITEA_HOST`）的 host 一致时，自动识别为 gitea。端口会参与匹配，且 scp 风格的 `git@host:owner/repo.git`（不带端口）也能匹配到带端口的配置 host。
+- 未配置 `GITEA_URL` 时，Gitea 实例的 URL 会落到 `git` 通用 Provider——只能 clone/pull/push，建仓与建 PR 都会报「不支持」。
+- 例外：`teamai init <url>` 克隆后（以及 `teamai init .` 读取已有的 `.teamai/teamai.yaml` 时），若团队仓 `teamai.yaml` 声明了 `provider: gitea`，会改用 Gitea Provider。API 地址取自团队仓 URL 的 scheme、host 和端口（设置了 `GITEA_URL` 时以它为准），用 `GITEA_TOKEN` 认证，成员按 Gitea 登录名注册。token 缺失或认证失败时 init 直接报错退出，不写成员文件和本地配置，**不会**退回用 git `user.name` 注册。SSH 形式的团队仓 URL 推导不出 API 地址，此时必须设置 `GITEA_URL`。
+- 声明 `provider: git` 或未声明时，行为不变：init 仍使用 git identity。
+- 检测顺序是 **已知 host → 自托管 GitLab → 自托管 Gitea → `git` 通用回落**。GitLab 在前只是因为它先实现；两者用不同的环境变量配置，把它们指向同一个 host 属于配置错误。
+
+### 内网 http 与非标准端口
+
+自建 Gitea 常见于内网明文 http（如 `http://gitea.internal:3000`）。Provider 全程**不做 `http` → `https` 强转**：clone URL 的 scheme 从 `GITEA_URL` 推导，端口完整保留。
+
+```bash
+export GITEA_URL=http://gitea.internal:3000
+teamai init agent/teamai-cli        # → http://gitea.internal:3000/agent/teamai-cli.git
+```
+
+### 路径格式
+
+Gitea **没有子组（subgroup）**，仓库路径恒为两段 `owner/repo`。`group/subgroup/repo` 这样的三段路径会报格式错误，而不是被折进 owner。
+
+也可以直接粘贴浏览器地址栏里的 URL：仓库根之后的 web 路由（`/src/branch/main`、`/pulls/42`、`/issues`、`/commit/<sha>` 等）会被自动剥离，解析回仓库本身。
+
+### 能力对照
+
+| 能力 | 实现 |
+|------|------|
+| clone | HTTPS 走 `http.extraHeader` 注入 Basic 认证，token **不进 remote URL、不落 `.git/config`**；亦支持 SSH 公钥 |
+| createRepo | 个人 `POST /user/repos`；组织 `POST /orgs/:org/repos`。owner 既不是当前用户也不是可见组织时**直接报错**，不回落到个人 namespace——否则会静默把仓库建到错误的位置 |
+| createPullRequest | `POST /repos/:owner/:repo/pulls`（`head`/`base`/`title`/`body`）；reviewer 由后续 `POST .../requested_reviewers` 追加，失败不影响已创建的 PR |
+| fetchMergeRequest | `GET /repos/:owner/:repo/pulls/:n` + commits + `.diff`；PR URL 的 host 必须与已配置实例一致，否则拒绝，避免把 token 发往未配置的 host |
+| listOrgRepos | `GET /orgs/:owner/repos` 分页；首页 404 时回退 `GET /users/:owner/repos`，个人 namespace 下的仓库同样可以拉到 |
+
+**关键方言**：
+
+- REST API 使用 Gitea 官方文档的 `Authorization: token <t>` 认证头。实测 Gitea 1.27.2 也接受 `Bearer`，但 `token` 是文档形式、兼容更老的实例，因此 provider 统一发 `token`。
+- PR 的 web 路由是复数 `/pulls/42`，与 GitHub 的单数 `/pull/42` 不同。`teamai import-mr` 据此区分，并额外要求 host 命中已配置实例。
+- git-over-HTTP 默认把 **token 当作 Basic 用户名、密码留空**（即文档里 `https://<token>@host/...` 的等价形式）。若实例前面有会改写认证头的反向代理，可设 `GITEA_USER` 指定真实用户名，此时 token 作为密码。
+
+### 默认 email 域
+
+Gitea 不设默认 email 域，使用用户的 git 全局配置。
+
 ## 手动指定 Provider
 
-除了 URL 自动检测，也可以在 team 仓库的 `teamai.yaml` 中显式写 `provider: github`、`provider: tgit`、`provider: cnb`、`provider: gitlab`、`provider: gitcode` 或 `provider: git` 强制切换。一个典型的 `teamai.yaml`：
+除了 URL 自动检测，也可以在 team 仓库的 `teamai.yaml` 中显式写 `provider: github`、`provider: tgit`、`provider: cnb`、`provider: gitlab`、`provider: gitcode`、`provider: gitea` 或 `provider: git` 强制切换。`push` 等命令始终按这个值选择 provider；`teamai init` 目前只在检测结果为 `git`、而声明为 `gitea` 时改用声明值（见 [Gitea Provider](#gitea-provider仅自托管)），其他组合仍以 URL 检测结果为准。一个典型的 `teamai.yaml`：
 
 ```yaml
 team: my-team
@@ -348,7 +415,7 @@ TGit 的 `gf` CLI 是例外：它只支持 macOS / Linux，且其路径会作为
 
 ## 新增 Provider
 
-Provider 是一个 TypeScript 接口（见 [`src/providers/types.ts`](../src/providers/types.ts)），新增带平台 API 能力的 GitLab / Bitbucket / Gitea provider 只需要：
+Provider 是一个 TypeScript 接口（见 [`src/providers/types.ts`](../src/providers/types.ts)），新增带平台 API 能力的 provider（如 Bitbucket、Forgejo）只需要：
 
 1. 新建 `src/providers/<name>/` 目录
 2. 实现 `GitProvider` 接口：`parseRepoInput` / `authenticate` / `cloneRepo` / `createRepo` / `createPullRequest` / `getDefaultEmailDomain`

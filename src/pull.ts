@@ -17,7 +17,7 @@ import { reconcilePlacementRecords } from './utils/pending-push.js';
 import { injectClaudeMdSection, removeClaudeMdSection } from './utils/claudemd.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler, AgentsHandler } from './resources/index.js';
 import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } from './resources/docs.js';
-import { isToolInstalledForConfig, ResourceHandler } from './resources/base.js';
+import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
 import { ruleFileExtensionForTool } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
@@ -337,6 +337,88 @@ function logSyncDetail(
   if (verbose && updated.length > 0) {
     const updatedNames = updated.map(i => i.name);
     log.dim(`    updated: ${updatedNames.join(', ')}`);
+  }
+}
+
+/**
+ * The tool-side paths that can receive team-owned resources, in the order the
+ * install check tries them. A tool counts as installed when any one of its roots
+ * exists, so target detection and skip reporting must read the same list.
+ */
+function resourceToolPaths(toolPath: { skills?: string; rules?: string; agents?: string }): string[] {
+  return [toolPath.skills, toolPath.rules, toolPath.agents].filter((p): p is string => !!p);
+}
+
+/**
+ * Report the tool targets this sync could not write to, and why.
+ *
+ * Resource handlers skip a tool whose root directory is absent, which used to be
+ * invisible: pull printed a green "Synced N skills" even when every target was
+ * skipped and nothing reached the disk. Naming each skipped target and the exact
+ * directory that was missing makes a zero-install pull diagnosable, and the
+ * all-skipped case is a warning rather than a success.
+ *
+ * Most machines have a dozen uninstalled tools, so the per-target lines would be
+ * noise on a healthy pull: they are printed in full only when nothing installed
+ * (the failure this exists for) or under `--verbose`, and summarized on one line
+ * otherwise.
+ *
+ * `openclaw` and `hermes` resolve their own roots (workspace dir / HERMES_HOME)
+ * instead of gating on baseDir, so they are not reported here.
+ */
+async function reportSkippedTargets(
+  teamConfig: TeamaiConfig,
+  localConfig: LocalConfig,
+  scopeLabel: string,
+  verbose = false,
+): Promise<void> {
+  const baseDir = resolveBaseDir(localConfig);
+  const skipped: string[] = [];
+  const skippedTools: string[] = [];
+  let installed = 0;
+
+  for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+    if (isAgentExcluded(localConfig, tool)) continue;
+    if (tool === 'openclaw' || tool === 'hermes') continue;
+
+    // Same any-of-three test getInstalledResourceTargets uses, so a tool this
+    // pull did write to is never reported as skipped.
+    const resourcePaths = resourceToolPaths(toolPath);
+    if (resourcePaths.length === 0) continue;
+
+    let isInstalled = false;
+    for (const resourcePath of resourcePaths) {
+      if (await ResourceHandler.isToolInstalled(resourcePath, baseDir)) {
+        isInstalled = true;
+        break;
+      }
+    }
+    if (isInstalled) {
+      installed++;
+      continue;
+    }
+
+    const missingRoots = [...new Set(resourcePaths.map((p) => path.join(baseDir, toolInstallRoot(p))))];
+    skippedTools.push(tool);
+    skipped.push(`[${scopeLabel}] ${tool}: skipped — ${missingRoots.join(', ')} not found`);
+  }
+
+  if (skipped.length === 0) return;
+
+  if (installed > 0 && !verbose) {
+    log.info(
+      `[${scopeLabel}] ${skipped.length} tool target(s) skipped — directory not found: ` +
+      `${skippedTools.join(', ')} (run with --verbose for the exact paths).`,
+    );
+  } else {
+    for (const line of skipped) log.info(line);
+  }
+
+  if (installed === 0) {
+    log.warn(
+      `[${scopeLabel}] No AI tool directories found under ${baseDir} — nothing was installed. ` +
+      'Run `teamai init --agent <id>` to enable a tool (creates its directory), then pull again.',
+    );
   }
 }
 
@@ -1213,6 +1295,10 @@ async function pullForScope(
 
     totalSynced += items.length;
   }
+
+  // Step 2b: Name the targets this sync could not write to, so a zero-install
+  // pull is visible instead of hiding behind the green "Synced N skills" line.
+  await reportSkippedTargets(freshConfig, localConfig, scopeLabel, !!options.verbose);
 
   // Step 3: Clean up tombstoned resources
   if (!options.dryRun) {

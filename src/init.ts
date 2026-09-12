@@ -5,8 +5,10 @@ import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConf
 import { describeUnappliedTeamHooks, hasTeamaiHooks, reconcileHooks, reconcileTeamHooksForConfig } from './hooks.js';
 import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials, pullRepoFastForward } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
-import { getProvider, detectProvider, detectProviderForInit, RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError } from './providers/index.js';
+import { checkGitIdentity, logGitIdentityFix, MISSING_GIT_IDENTITY, RETRY_HINT } from './members.js';
+import { getProvider, detectProvider, detectProviderForInit, RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError, GiteaProvider, type GitProvider } from './providers/index.js';
 import { parseGenericGitExistingRemote } from './providers/git/repo-url.js';
+import { deriveGiteaBaseUrl, giteaBaseUrl } from './providers/gitea/index.js';
 import { probeSelfHostedGitLab } from './providers/gitlab/probe.js';
 import { ensureDir, writeFile, writeFileAtomic, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { queueOwner, sameQueueOwner, setAsideQueueOnModeSwitch } from './utils/pending-learnings.js';
@@ -538,6 +540,75 @@ async function isInsideGitRepo(dir: string): Promise<boolean> {
 }
 
 /**
+ * Printed when a team repo that declares `provider: gitea` cannot be
+ * authenticated. Falling back to the git identity is what creates members that
+ * do not exist on the host (issue #11), so the user must supply Gitea
+ * credentials instead.
+ */
+function declaredGiteaAuthHint(): string {
+  return 'This team repo declares `provider: gitea`, so members register under their Gitea login, '
+    + 'not their git user.name. Set GITEA_TOKEN to a Gitea access token (and GITEA_URL if the '
+    + 'Gitea API is not served from the team repo host), then re-run `teamai init`.';
+}
+
+/**
+ * Provider to use once the team repo's declared `provider` is known.
+ *
+ * Host detection cannot recognise a self-hosted Gitea without GITEA_URL, so its
+ * URLs resolve to the generic `git` provider, whose "authentication" is only the
+ * local git user.name. When the team repo declares `provider: gitea`, switch to
+ * Gitea instead, taking the instance from the team repo URL unless GITEA_URL is
+ * set. Only Gitea overrides detection for now; any other combination keeps the
+ * detected provider.
+ *
+ * @throws when neither GITEA_URL nor the team repo URL gives a Gitea API location.
+ */
+function resolveDeclaredProvider(
+  detected: GitProvider,
+  declared: string | undefined,
+  repoUrl: string,
+): GitProvider {
+  if (detected.name !== 'git' || declared !== 'gitea') return detected;
+
+  const baseUrl = deriveGiteaBaseUrl(repoUrl) ?? undefined;
+  if (!baseUrl && !process.env.GITEA_URL?.trim()) {
+    throw new Error(
+      'This team repo declares `provider: gitea`, but the Gitea API URL cannot be derived '
+        + `from ${redactGitCredentials(repoUrl)}. Set GITEA_URL (e.g. http://gitea.example.com:3000) `
+        + 'and GITEA_TOKEN, then re-run `teamai init`.',
+    );
+  }
+  log.info(`Team repo declares provider: gitea. Authenticating with Gitea at ${giteaBaseUrl(baseUrl)}`);
+  return new GiteaProvider({ baseUrl });
+}
+
+/**
+ * Authenticate with `provider` for init and report progress. Returns null after
+ * exiting non-zero when authentication fails; `hint` is printed after the failure.
+ */
+async function authenticateForInit(provider: GitProvider, hint?: string): Promise<string | null> {
+  const isGenericGit = provider.name === 'git';
+  const authSpin = spinner(isGenericGit ? 'Checking Git identity...' : 'Checking authentication...').start();
+  try {
+    let username: string;
+    if (provider.isAuthenticated()) {
+      username = await provider.authenticate();
+      authSpin.succeed(isGenericGit ? `Using Git identity ${username}` : `Authenticated as ${username}`);
+    } else {
+      authSpin.info(isGenericGit ? 'Resolving Git identity' : 'Not logged in — starting authentication');
+      username = await provider.authenticate();
+      log.success(isGenericGit ? `Using Git identity ${username}` : `Authenticated as ${username}`);
+    }
+    return username;
+  } catch (e) {
+    authSpin.fail(`Authentication failed: ${(e as Error).message}`);
+    if (hint) log.error(hint);
+    process.exit(1);
+    return null;
+  }
+}
+
+/**
  * Git-free HTTP onboarding (issue #1). A read-only consumer only needs an API
  * key: no git auth, no clone, no member/reviewer push. Skills/rules/CLAUDE.md are
  * delivered on each session via the report/sync/ack lifecycle (the local-agent
@@ -598,6 +669,7 @@ export async function initHttp(
     const confirmed = await askConfirmation(`teamai already initialized at ${existingConfigPath}. Overwrite? [y/N] `);
     if (!confirmed) {
       log.info('Aborted. Existing config is unchanged.');
+      log.info('To only (re)register yourself as a team member, run `teamai members register`.');
       return;
     }
   }
@@ -692,6 +764,16 @@ export async function initHttp(
     await saveStateForScope(state, localConfig);
   } catch {
     // state may not exist yet
+  }
+
+  // Step 4.5: seed a custom agent's configured root before hook injection —
+  // see the matching comment in the git-mode `init` path (#867).
+  try {
+    const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+    const seeded = await ensureEnabledAgentDirs(localConfig, teamConfig);
+    if (seeded.length > 0) log.debug(`Seeded tool dirs for: ${seeded.join(', ')}`);
+  } catch (e) {
+    log.debug(`Tool-dir seeding skipped: ${(e as Error).message}`);
   }
 
   // Step 5: inject hooks (built-in dispatch incl. the reporter) via the same
@@ -1056,6 +1138,7 @@ export async function initSelfRepo(options: GlobalOptions & {
       const confirmed = await askConfirmation('Overwrite existing config? [y/N] ');
       if (!confirmed) {
         log.info('Aborted. Existing config is unchanged.');
+        log.info('To only (re)register yourself as a team member, run `teamai members register`.');
         return;
       }
     }
@@ -1068,15 +1151,24 @@ export async function initSelfRepo(options: GlobalOptions & {
     process.exit(1);
     return;
   }
-  let providerName: string;
+  // A `provider` declared in an existing .teamai/teamai.yaml wins where host
+  // detection falls back to generic git (issue #11); the anonymous GitLab probe
+  // only runs when nothing is declared.
+  const declaredProvider = await pathExists(path.join(localPath, 'teamai.yaml'))
+    ? (await loadTeamConfig(localPath))?.provider
+    : undefined;
+  let provider: GitProvider;
   try {
-    providerName = await selectInitProvider(remoteUrl, options.provider);
+    // --provider wins outright; the team repo's declared provider only
+    // overrides auto-detection (issue #11).
+    const detectedName = await selectInitProvider(remoteUrl, options.provider);
+    provider = resolveDeclaredProvider(getProvider(detectedName), options.provider ? undefined : declaredProvider, remoteUrl);
   } catch (e) {
     log.error((e as Error).message);
     process.exit(1);
     return;
   }
-  const provider = getProvider(providerName);
+  const providerName = provider.name;
   if (!options.provider) log.debug(`Detected provider: ${providerName} (from ${redactGitCredentials(remoteUrl)})`);
 
   let repoInfo;
@@ -1091,14 +1183,17 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
 
   // Step 2: authenticate (needed to push reports + open knowledge PRs).
-  await provider.ensureInstalled();
   const authSpin = spinner('Checking authentication...').start();
   let username: string;
   try {
+    // Inside the guard: Gitea's ensureInstalled() rejects a missing token, and
+    // that must end in the same actionable exit as a failed login.
+    await provider.ensureInstalled();
     username = await provider.authenticate();
     authSpin.succeed(`Authenticated as ${username}`);
   } catch (e) {
     authSpin.fail(`Authentication failed: ${(e as Error).message}`);
+    if (providerName === 'gitea' && declaredProvider === 'gitea') log.error(declaredGiteaAuthHint());
     process.exit(1);
     return;
   }
@@ -1177,7 +1272,7 @@ export async function initSelfRepo(options: GlobalOptions & {
   // Which AI tools to set up in this repo (create skills dir + inject hooks +
   // commit their settings.json). Resolved from --agent, else HOME detection
   // (non-interactive), else an interactive picker. Written to enabledAgents,
-  // which drives seedSelfModeToolDirs and hook injection alike.
+  // which drives ensureEnabledAgentDirs and hook injection alike.
   const existingSelfConfig = await loadLocalConfigForScope('project', businessRepoRoot);
   const selectedAgents = await promptForSelfModeAgents(options);
   if (selectedAgents.length > 0) {
@@ -1217,8 +1312,8 @@ export async function initSelfRepo(options: GlobalOptions & {
   // otherwise skip everything).
   const filterAgents = selectedAgents.length > 0 ? selectedAgents : undefined;
   try {
-    const { seedSelfModeToolDirs } = await import('./known-agents.js');
-    const seeded = await seedSelfModeToolDirs(localConfig, teamConfig);
+    const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+    const seeded = await ensureEnabledAgentDirs(localConfig, teamConfig);
     if (seeded.length > 0) log.debug(`Seeded tool dirs for: ${seeded.join(', ')}`);
   } catch (e) {
     log.debug(`Tool-dir seeding skipped: ${(e as Error).message}`);
@@ -1237,7 +1332,14 @@ export async function initSelfRepo(options: GlobalOptions & {
   // (b) makes `mode: self` + hooks travel with `git clone` so teammates
   // auto-bootstrap, (c) is exactly what the mode intends. We commit but never
   // push — the user pushes their business repo themselves.
-  if (!options.dryRun) {
+  //
+  // Both this commit and the member registration below need a git author, so
+  // preflight once (same check as `teamai members register`) instead of letting
+  // git print its raw "Author identity unknown" text.
+  const identityError = options.dryRun ? null : await checkGitIdentity(businessRepoRoot);
+  if (identityError) {
+    log.warn('Git identity is not configured, so the .teamai/ skeleton was not committed (commit it manually before `teamai push`).');
+  } else if (!options.dryRun) {
     try {
       const { commitPaths, hasCommits } = await import('./utils/git.js');
       const hadCommits = await hasCommits(businessRepoRoot);
@@ -1276,7 +1378,12 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
 
   // Step 6: register member on the reports orphan branch (never touches main / active tree).
-  if (!options.dryRun) {
+  // Non-null when the push did not land; the closing summary reports it instead
+  // of claiming success (see logMemberRegistrationOutcome).
+  // A missing identity stops here too, before the reports worktree is set up:
+  // creating that branch is itself a commit.
+  let memberRegistrationError: string | null = identityError;
+  if (!options.dryRun && !memberRegistrationError) {
     try {
       const { updateReports } = await import('./utils/reports-branch.js');
       let isNewSelfMember = false;
@@ -1307,11 +1414,18 @@ export async function initSelfRepo(options: GlobalOptions & {
             ? 'Member registered on the teamai-reports branch'
             : 'Member roster updated on the teamai-reports branch');
         } else {
-          log.warn('Member registration could not be pushed (no write access?). You are still set up locally.');
+          memberRegistrationError = 'the registration commit did not reach the teamai-reports branch on origin (rerun with --verbose to see why)';
         }
+      } else {
+        // The file can also be a leftover from an earlier init whose push failed,
+        // which this run cannot tell apart from a genuine registration.
+        log.info(`Member ${username} is already registered locally.`);
+        log.info('If you do not show up in `teamai members`, run `teamai members register`.');
       }
     } catch (e) {
-      log.warn(`Member registration skipped (non-blocking): ${(e as Error).message}`);
+      // Reported once, as an error, by the closing summary.
+      memberRegistrationError = (e as Error).message;
+      log.debug(`Member registration failed: ${memberRegistrationError}`);
     }
   }
 
@@ -1324,7 +1438,7 @@ export async function initSelfRepo(options: GlobalOptions & {
     // state may not exist yet
   }
 
-  log.success('teamai initialized (single-repo mode)!');
+  logMemberRegistrationOutcome(memberRegistrationError, 'teamai initialized (single-repo mode)!');
   log.info('Next steps:');
   log.info('  1. Add team resources by dropping them into .teamai/ (or author them in your AI tool as usual):');
   log.info('       .teamai/skills/    team skills');
@@ -1453,6 +1567,7 @@ export async function init(options: GlobalOptions & {
       const confirmed = await askConfirmation('Overwrite existing config? [y/N] ');
       if (!confirmed) {
         log.info('Aborted. Existing config is unchanged.');
+        log.info('To only (re)register yourself as a team member, run `teamai members register`.');
         return;
       }
     }
@@ -1487,7 +1602,7 @@ export async function init(options: GlobalOptions & {
     process.exit(1);
     return;
   }
-  const provider = getProvider(providerName);
+  let provider = getProvider(providerName);
   if (!forcedProvider) log.debug(`Detected provider: ${providerName}`);
 
   let repoInfo;
@@ -1498,24 +1613,17 @@ export async function init(options: GlobalOptions & {
     process.exit(1);
   }
 
-  // Step 2: Ensure provider tools are installed and authenticate
+  // Step 2: Ensure provider tools are installed and authenticate. Generic git
+  // defers resolving the git identity until the team repo's teamai.yaml can be
+  // read: it may declare a provider (Gitea) that host detection missed.
   await provider.ensureInstalled();
 
-  const isGenericGit = provider.name === 'git';
-  const authSpin = spinner(isGenericGit ? 'Checking Git identity...' : 'Checking authentication...').start();
-  let username: string;
-  try {
-    if (provider.isAuthenticated()) {
-      username = await provider.authenticate();
-      authSpin.succeed(isGenericGit ? `Using Git identity ${username}` : `Authenticated as ${username}`);
-    } else {
-      authSpin.info(isGenericGit ? 'Resolving Git identity' : 'Not logged in — starting authentication');
-      username = await provider.authenticate();
-      log.success(isGenericGit ? `Using Git identity ${username}` : `Authenticated as ${username}`);
-    }
-  } catch (e) {
-    authSpin.fail(`Authentication failed: ${(e as Error).message}`);
-    process.exit(1);
+  const detectedGenericGit = provider.name === 'git';
+  let username = '';
+  if (!detectedGenericGit) {
+    const authenticated = await authenticateForInit(provider);
+    if (authenticated === null) return;
+    username = authenticated;
   }
 
   // Step 3: Clone or link repo
@@ -1706,11 +1814,7 @@ export async function init(options: GlobalOptions & {
     }
   }
 
-  // Step 3.5: Configure git user for the team repo
-  const emailDomain = provider.getDefaultEmailDomain() ?? undefined;
-  await configureGitUser(localPath, username, username, undefined, emailDomain);
-
-  // Step 4: Load team config
+  // Step 3.5: Load team config
   // Remote teamai.yaml.scope (if present) is ignored — local install location
   // is decided only by --scope / default (issue #250).
   const teamConfig = await loadTeamConfig(localPath);
@@ -1749,6 +1853,29 @@ export async function init(options: GlobalOptions & {
     }
   }
 
+  // Step 4: Honour the provider the team repo declares, then resolve the
+  // username from the effective provider. It names the member file and
+  // LocalConfig.username, so it must never be a git identity for a Gitea repo
+  // (issue #11).
+  if (detectedGenericGit) {
+    try {
+      provider = resolveDeclaredProvider(provider, teamConfig?.provider, repoInfo.httpsUrl);
+    } catch (e) {
+      log.error((e as Error).message);
+      process.exit(1);
+      return;
+    }
+    const hint = provider.name === 'gitea' ? declaredGiteaAuthHint() : undefined;
+    const authenticated = await authenticateForInit(provider, hint);
+    if (authenticated === null) return;
+    username = authenticated;
+  }
+
+  // Step 4.5: Configure git user for the team repo
+  const emailDomain = provider.getDefaultEmailDomain() ?? undefined;
+  await configureGitUser(localPath, username, username, undefined, emailDomain);
+
+
   // Resolve active projects (non-interactive: --project flag only) so the roster
   // records project membership. Role selection stays in its original place below
   // (it may prompt) — the member file's project membership is the P3 goal here.
@@ -1769,10 +1896,17 @@ export async function init(options: GlobalOptions & {
     additionalRoles: [],
   };
 
+  // Same preflight as `teamai members register`: without an author the commits
+  // below fail with a raw git error, so report the fix and commit nothing.
+  // Non-null when registration did not land; the closing summary reports it
+  // instead of claiming success so a half-finished init can't pass for a
+  // successful one.
+  let memberRegistrationError: string | null = options.dryRun ? null : await checkGitIdentity(localPath);
+
   // Empty-repo exception: a one-time skeleton push of teamai.yaml + gitkeeps may
   // still land on the default branch so the knowledge tree exists. Member files
   // after that go to teamai-reports.
-  if (createdSkeleton && !options.dryRun) {
+  if (createdSkeleton && !options.dryRun && !memberRegistrationError) {
     try {
       await pushRepoDirectly(localPath, '[teamai] Initialize team repo skeleton', [
         'teamai.yaml',
@@ -1791,7 +1925,9 @@ export async function init(options: GlobalOptions & {
   // default branch). The clone's leftover members/ is a read-only inherited
   // root: the merge below absorbs the member's pre-switch file.
   let isNewMember = true;
-  if (!options.dryRun) {
+  if (options.dryRun) {
+    log.info(`[dry-run] Would register member ${username} on the teamai-reports branch`);
+  } else if (!memberRegistrationError) {
     try {
       const { updateReports } = await import('./utils/reports-branch.js');
       let memberChanged = false;
@@ -1818,31 +1954,38 @@ export async function init(options: GlobalOptions & {
         };
       });
       if (memberChanged) {
-        log.success(isNewMember
-          ? `Registered as team member: ${username}`
-          : `Updated member roster: ${username}${memberProjects ? ` (projects: ${memberProjects.join(', ')})` : ''}`);
         if (pushed) {
+          // Only claimed once the push landed, so it never precedes the error.
+          log.success(isNewMember
+            ? `Registered as team member: ${username}`
+            : `Updated member roster: ${username}${memberProjects ? ` (projects: ${memberProjects.join(', ')})` : ''}`);
           log.success(isNewMember
             ? 'Member registered on the teamai-reports branch'
             : 'Member roster updated on the teamai-reports branch');
         } else {
-          log.warn('Member registration could not be pushed (no write access?). You are still set up locally.');
+          memberRegistrationError = 'the registration commit did not reach the teamai-reports branch on origin (rerun with --verbose to see why)';
         }
       } else if (!isNewMember) {
+        // May also be a leftover from an earlier init whose push failed — this run
+        // cannot tell that apart from a registration that reached the remote.
         log.info(`Member ${username} already registered`);
+        log.info('If you do not show up in `teamai members`, run `teamai members register`.');
       }
     } catch (e) {
-      log.warn(`Member registration skipped (non-blocking): ${(e as Error).message}`);
+      // Reported once, as an error, by the closing summary.
+      memberRegistrationError = (e as Error).message;
+      log.debug(`Member registration failed: ${memberRegistrationError}`);
     }
-  } else {
-    log.info(`[dry-run] Would register member ${username} on the teamai-reports branch`);
   }
 
   // Step 5.5: Configure default MR reviewers (only for fresh setup with no reviewers yet).
   // --force implies non-interactive: skip reviewer prompts entirely (can be configured later).
+  // Also skipped without a git identity: the reviewer commit would fail with the
+  // same raw git error the registration preflight just replaced.
   const currentConfig = await loadTeamConfig(localPath);
   const hasReviewers = currentConfig?.reviewers && currentConfig.reviewers.length > 0;
-  if (isNewMember && !hasReviewers && !options.force) {
+  const canCommit = memberRegistrationError !== MISSING_GIT_IDENTITY;
+  if (isNewMember && !hasReviewers && !options.force && canCommit) {
     const wantReviewers = await askConfirmation(
       '\nWould you like to configure default MR reviewers? [y/N] ',
     );
@@ -1964,6 +2107,25 @@ export async function init(options: GlobalOptions & {
   let stubDeployed = 0;
   if (reloadedTeamConfig) {
     const filterAgents = requestedAgents.length > 0 ? requestedAgents : undefined;
+
+    // Step 6.7: seed a custom agent's configured root before hook injection,
+    // same as self-mode's Step 5.3 above — a custom `--agent` target does not
+    // have to already exist on disk the way a built-in tool does. Without
+    // this, a custom agent configured only in teamai.yaml's toolPaths (its
+    // root never created by anything else) was silently skipped by every
+    // pull forever, since isToolInstalled treats a missing root as "not
+    // installed" (#867). Built-in tools are left untouched here: their root
+    // already existing is exactly what doctor's "is installed" check verifies
+    // (#598), so seeding them outside self mode would silently manufacture a
+    // directory for software that was never actually installed.
+    try {
+      const { ensureEnabledAgentDirs } = await import('./known-agents.js');
+      const seeded = await ensureEnabledAgentDirs(localConfig, reloadedTeamConfig);
+      if (seeded.length > 0) log.debug(`Seeded tool dirs for: ${seeded.join(', ')}`);
+    } catch (e) {
+      log.debug(`Tool-dir seeding skipped: ${(e as Error).message}`);
+    }
+
     await reconcileHooksForInit(reloadedTeamConfig, localConfig, filterAgents);
 
     // Step 7.5: Deploy the built-in discovery stub immediately so the teamai
@@ -1980,7 +2142,7 @@ export async function init(options: GlobalOptions & {
     }
   }
 
-  log.success('teamai initialized successfully!');
+  logMemberRegistrationOutcome(memberRegistrationError, 'teamai initialized successfully!');
   if (stubDeployed > 0) {
     log.info('The built-in teamai skill is ready in your IDE; it loads its workflows with `teamai skill get`.');
   } else {
@@ -1991,4 +2153,39 @@ export async function init(options: GlobalOptions & {
 
   // Close the readline singleton so the process can exit cleanly.
   closePrompt();
+}
+
+/**
+ * Print the closing status line of `teamai init`, shared by the clone-based and
+ * single-repo flows (they differ only in their success wording).
+ *
+ * The member-registration push is best-effort (it needs a git identity and
+ * network), but a partial init used to end on `✔ teamai initialized
+ * successfully!` with exit 0 — the earlier `⚠ Push failed` line was easy to miss
+ * by eye and invisible to a script, leaving a member who is silently absent from
+ * `teamai members`. When registration did not land, the summary says so, points
+ * at the retry command, and exits non-zero. The local config is written either
+ * way, so the failure is recoverable without a re-init.
+ *
+ * @param memberRegistrationError - Why registration was not pushed, or null when
+ *   it landed (or was not attempted, e.g. an already-registered member).
+ * @param successLine - Line to print when registration is not a problem.
+ */
+export function logMemberRegistrationOutcome(
+  memberRegistrationError: string | null,
+  successLine: string,
+): void {
+  if (memberRegistrationError) {
+    log.error(`teamai is configured, but member registration was not pushed: ${memberRegistrationError}`);
+    log.info('You will not appear in `teamai members` until it succeeds.');
+    if (memberRegistrationError === MISSING_GIT_IDENTITY) {
+      logGitIdentityFix();
+      log.info(RETRY_HINT);
+    } else {
+      log.info('Fix the cause (e.g. network access or write permission on the team repo), then run `teamai members register`.');
+    }
+    process.exitCode = 1;
+  } else {
+    log.success(successLine);
+  }
 }

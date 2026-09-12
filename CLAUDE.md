@@ -27,4 +27,4 @@ TypeScript, Node 20+ (`npm run lint` needs ^20.19 or >=22.12), tsup (ESM), Vites
 不要求覆盖下面的完整 provider × agent 矩阵——额外 provider / agent 的覆盖交给 CI，或在本地环境不具备时说明即可：
 
 - Agent：Claude、Codex、CodeBuddy、OpenCode
-- Provider：`git`、`gitlab`、`github`
+- Provider：`git`、`gitlab`、`github`、`gitea`

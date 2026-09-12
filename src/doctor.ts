@@ -404,6 +404,23 @@ export async function buildChecks(ctx: DoctorContext, stage: CheckStage = 'docto
       fix: 'Export GITLAB_TOKEN (a Personal Access Token with `api` scope). '
         + 'GITLAB_PRIVATE_TOKEN and GITLAB_PAT are accepted as aliases.',
     });
+  } else if (providerName === 'gitea') {
+    // Gitea needs no CLI — only an access token plus the instance base URL.
+    const { giteaIsAuthenticated } = await import('./providers/gitea/index.js');
+    checks.push(
+      {
+        name: 'Gitea instance URL is configured',
+        check: async () => Boolean(process.env.GITEA_URL?.trim()),
+        fix: 'Export GITEA_URL, e.g. https://gitea.example.com. Gitea has no public host, '
+          + 'so the base URL is required for API access.',
+      },
+      {
+        name: 'Gitea token is configured',
+        check: async () => giteaIsAuthenticated(),
+        fix: 'Export GITEA_TOKEN (a Gitea access token with repo scope). '
+          + 'GITEA_ACCESS_TOKEN and GITEA_PAT are accepted as aliases.',
+      },
+    );
   } else if (providerName === 'gitcode') {
     // GitCode needs no CLI — only a Personal Access Token (env or ~/.netrc).
     const { gitcodeIsAuthenticated } = await import('./providers/gitcode/index.js');
