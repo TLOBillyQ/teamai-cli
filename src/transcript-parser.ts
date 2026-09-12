@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { TEAMAI_RECALL_OUTPUT_START, TEAMAI_RECALL_OUTPUT_END } from './types.js';
 
 export interface TranscriptVoteData {
   recalledDocIds: string[];
@@ -114,8 +115,8 @@ function extractRecalledDocIdsFromValue(value: unknown, out: Set<string>): void 
 }
 
 function extractRecalledDocIds(text: string, out: Set<string>): void {
-  const START = '--- [teamai:recall:start] ---';
-  const END = '--- [teamai:recall:end] ---';
+  const START = TEAMAI_RECALL_OUTPUT_START;
+  const END = TEAMAI_RECALL_OUTPUT_END;
   const filePattern = /^File:\s*(.+)$/gm;
 
   let searchFrom = 0;

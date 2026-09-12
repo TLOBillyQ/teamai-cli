@@ -29,6 +29,7 @@
 - [进阶功能](#进阶功能)
 - [命令参考](#命令参考)
 - [配置文件参考](#配置文件参考)
+  - [托管块标记](#托管块标记)
 - [卸载](#卸载)
 - [常见问题 FAQ](#常见问题-faq)
 
@@ -309,6 +310,8 @@ teamai init . --agent claude,codex   # 非交互：启用 Claude Code + Codex
 - **`--agent <name...>`** —— 显式列表，可重复或逗号分隔：`--agent claude`、`--agent claude,codex`、`--agent claude --agent cursor`。常用 id 包括 `claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`kimi`（Kimi Code CLI）、`dsh`（DeepSeek Harness）。
 - **交互式（无 `--agent`、有终端）** —— teamai 弹出多选列表。第 1 项是 **Auto**，会列出你本机已安装的 AI 工具（`~/.claude`、`~/.codex`……）并作为回车默认项；其余各项是具体工具。Auto 与具体工具可以组合勾选。
 - **非交互（无 `--agent`、无终端 —— CI、hook、clone 时自愈 bootstrap）** —— teamai 会按你本机 home 目录下已装的工具（`~/.claude`、`~/.codex`……）来建。若一个都没检测到，则什么都不建（你仍拿到知识，可稍后运行 `teamai init .` 再选工具）。
+
+自动检测——包括多选列表的 **Auto** 项和非交互探测——只覆盖常用编码工具（`claude`、`codex`、`cursor`、`joycode`、`codebuddy`、`workbuddy`、`kimi`）。其他受支持的工具不会被自动检测到，需要显式启用，例如 DeepSeek Harness 用 `--agent dsh`。
 
 **数据如何在分支间拆分：**
 
@@ -1821,6 +1824,25 @@ contributeHintEnabled: false   # 可选，每机器覆盖 sharing.contributeHint
 
 **签名。** 设置 `secret` 后，每个请求都会带上 `X-TeamAI-Signature: sha256=<hmac>`——对**实际发送的请求体**计算的 HMAC-SHA256，供接收端校验真实性。`teamai webhook list` 与 `teamai webhook test` 可查看和测试已配置的端点。
 
+### 托管块标记
+
+teamai 会往几类由你自己维护的文件（各工具的指令文件、shell profile）里写内容，并始终把这部分内容放在一对固定的起止标记之间。标记之间的内容每次同步都会重新生成，请勿手改；标记之外的内容不会被改动，`teamai uninstall` 也只移除这些区块。编写安装验收、健康检查脚本时，请精确匹配下表中的字符串。
+
+路径在 project scope 下相对项目根目录，在 user scope 下相对 home 目录。工具的*指令文件*即 `toolPaths` 中该工具的 `claudemd` 路径：`.claude/CLAUDE.md`（`claude`）、`.claude-internal/CLAUDE.md`（`claude-internal`）、`.tclaude/CLAUDE.md`（`tclaude`）、`.codebuddy/CODEBUDDY.md`（`codebuddy`）、`.kimi-code/AGENTS.md`（`kimi`）、`.openclaw/workspace/AGENTS.md`（`openclaw`）、`AGENTS.md`（`hermes`、`workbuddy`）。没有指令文件的工具（如 `codex`、`cursor`、`opencode`、`qoder`、`joycode`）不会被写入任何指令文件区块。工具自身的目录（如 `.claude/`、`.kimi-code/`）存在时才会写入这些区块；例外是 `hermes`，它不做该检查，因此团队文化与共享指令区块总会写入根目录的 `AGENTS.md`。
+
+| 标记（起 / 止） | 写入位置 | 写入时机 | 常量（`src/types.ts`） |
+| --- | --- | --- | --- |
+| `<!-- [teamai:rules:start] -->` / `<!-- [teamai:rules:end] -->` | `kimi`：`.kimi-code/AGENTS.md`；`hermes`：`$HERMES_HOME` 下的 `SOUL.md`（默认 `~/.hermes/SOUL.md`） | `pull` 时内联所有团队规则正文（这些工具没有 rules 目录）；团队最后一条 rule 消失时区块随之移除 | `TEAMAI_RULES_START` / `TEAMAI_RULES_END` |
+| `<!-- [teamai:culture:start] -->` / `<!-- [teamai:culture:end] -->` | 各工具的指令文件 | `pull` 时，团队仓存在 `culture.md`（见[团队文化](#团队文化)） | `TEAMAI_CULTURE_START` / `TEAMAI_CULTURE_END` |
+| `<!-- [teamai:claudemd:start] -->` / `<!-- [teamai:claudemd:end] -->` | 各工具的指令文件 | `pull` 时，团队仓 `claudemd/` 下有属于你当前 namespace 的共享指令 | `TEAMAI_CLAUDEMD_START` / `TEAMAI_CLAUDEMD_END` |
+| `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | 同时支持子代理的工具的指令文件：`claude`、`claude-internal`、`tclaude`、`codebuddy`、`kimi` | recall 开启时由 `pull` 与 `teamai recall enable` 写入（默认关闭，可通过 `sharing.recall.enabled` 或 `teamai recall enable` 开启），`teamai recall disable` 移除；内容是让主对话调用 `teamai-recall` 子代理的说明 | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
+| `# [teamai:env:start]` / `# [teamai:env:end]` | shell profile：设置了 `sharing.env.shellProfilePath` 则用它，否则 `$SHELL` 为 zsh 时是 `~/.zshrc`，其余为 `~/.bashrc` | `pull` 时，团队仓定义了 env 变量且 `sharing.env.injectShellProfile` 不为 `false`；区块里只有一行 source teamai 的 `env.sh` | `TEAMAI_ENV_START` / `TEAMAI_ENV_END` |
+| `--- [teamai:recall:start] ---` / `--- [teamai:recall:end] ---` | **不落盘**，只由 `teamai recall` 打印到终端（stdout） | 每次运行 `teamai recall`；起始行后面会跟结果数，如 `--- [teamai:recall:start] --- (3 results)` | `TEAMAI_RECALL_OUTPUT_START` / `TEAMAI_RECALL_OUTPUT_END` |
+
+> **`recall` 与 `recall-rules`**：两者只差一个后缀，但毫无关系。要验证某个工具是否装好了 recall，应在它的指令文件里查 `<!-- [teamai:recall-rules:start] -->`。`[teamai:recall:start]` 只会出现在 `teamai recall` 的输出（以及记录了该输出的 agent transcript）里，去 `CLAUDE.md` / `AGENTS.md` 里查它必然失败。
+
+如果文件里某对标记只剩下一个（例如手动编辑后），下次同步找不到完整区块，会在末尾追加一个新区块而不是替换。要删就两个标记一起删，要留就都留。
+
 ---
 
 ## 卸载
@@ -1843,7 +1865,7 @@ teamai uninstall --agent claude
 
 移除内容：
 - AI 工具 settings 中的 teamai hooks
-- CLAUDE.md 中的 teamai rules 块（保留用户自写内容）
+- 工具指令文件（CLAUDE.md / AGENTS.md 等）中的 teamai 托管块（见[托管块标记](#托管块标记)；保留用户自写内容）
 - 团队同步的 skills，包括 OpenClaw workspace skills（保留用户自建 skills）
 - 团队同步的 rules
 - 团队同步的自定义 agents 和 CLI 内置 agents（保留用户自建 agents）

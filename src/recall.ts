@@ -6,7 +6,7 @@ import type { SearchResult } from './utils/search-index.js';
 import { readFileSafe, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions, SearchIndex, LocalConfig } from './types.js';
-import { getDataHome, getTeamaiHome } from './types.js';
+import { getDataHome, getTeamaiHome, TEAMAI_RECALL_OUTPUT_START, TEAMAI_RECALL_OUTPUT_END } from './types.js';
 import { queryCodeKnowledge } from './code-knowledge-recall.js';
 import type { CodeKnowledgeResult, SourceAnchor } from './code-knowledge-recall.js';
 import { recordRecallQuality } from './recall-quality.js';
@@ -185,7 +185,7 @@ function resolveReadablePath(
 
 export function formatResults(results: ScopedSearchResult[]): string {
   const lines: string[] = [];
-  lines.push(`--- [teamai:recall:start] --- (${results.length} result${results.length !== 1 ? 's' : ''})`);
+  lines.push(`${TEAMAI_RECALL_OUTPUT_START} (${results.length} result${results.length !== 1 ? 's' : ''})`);
   lines.push('');
 
   for (let i = 0; i < results.length; i++) {
@@ -238,7 +238,7 @@ export function formatResults(results: ScopedSearchResult[]): string {
     lines.push('');
   }
 
-  lines.push('--- [teamai:recall:end] ---');
+  lines.push(TEAMAI_RECALL_OUTPUT_END);
   lines.push('');
   lines.push('以上内容来自团队知识库，仅供参考。如需详细信息，请用 Read 工具读取对应文件。');
   return lines.join('\n');
