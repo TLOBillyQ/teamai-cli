@@ -3,6 +3,11 @@ import path from 'node:path';
 
 // ── Mocks ────────────────────────────────────────────────
 
+// Identity preflight before member registration; configured by default.
+const configuredIdentity = async (key: string) => ({
+  value: key === 'user.email' ? 'testuser@example.com' : 'testuser',
+});
+
 const mockGit = {
   init: vi.fn(),
   addRemote: vi.fn(),
@@ -11,8 +16,13 @@ const mockGit = {
   status: vi.fn().mockResolvedValue({ staged: [] }),
   commit: vi.fn(),
   push: vi.fn(),
+  pull: vi.fn().mockResolvedValue({
+    summary: { changes: 0, insertions: 0, deletions: 0 },
+  }),
   revparse: vi.fn().mockResolvedValue('main'),
-  raw: vi.fn(),
+  getConfig: vi.fn(configuredIdentity),
+  // `git remote get-url` — no origin by default, so getRemoteUrl() returns null.
+  raw: vi.fn().mockRejectedValue(new Error('no such remote')),
 };
 
 vi.mock('simple-git', () => ({
@@ -36,6 +46,13 @@ vi.mock('fs-extra', () => ({
   },
 }));
 
+// One shared spinner so tests can assert what init reported (e.g. "Using Git identity").
+const mockSpinner = vi.hoisted(() => {
+  const s: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const m of ['start', 'succeed', 'fail', 'info', 'warn']) s[m] = vi.fn(() => s);
+  return s;
+});
+
 vi.mock('../utils/logger.js', () => ({
   log: {
     info: vi.fn(),
@@ -45,13 +62,7 @@ vi.mock('../utils/logger.js', () => ({
     debug: vi.fn(),
     dim: vi.fn(),
   },
-  spinner: () => ({
-    start: vi.fn().mockReturnThis(),
-    succeed: vi.fn().mockReturnThis(),
-    fail: vi.fn().mockReturnThis(),
-    info: vi.fn().mockReturnThis(),
-    warn: vi.fn().mockReturnThis(),
-  }),
+  spinner: () => mockSpinner,
 }));
 
 const mockGfRepoClone = vi.fn();
@@ -65,6 +76,12 @@ const mockCnbRepoClone = vi.fn();
 const mockCnbCreateRepo = vi.fn();
 const mockCnbOrganizationExists = vi.fn();
 const mockEnsureCnbInstalled = vi.fn();
+
+// The anonymous self-hosted GitLab probe would otherwise hit `fetch` for every
+// unknown host; these tests assert on the provider API calls only.
+vi.mock('../providers/gitlab/probe.js', () => ({
+  probeSelfHostedGitLab: vi.fn().mockResolvedValue(null),
+}));
 
 // Mock the provider-level gf-cli module (init.ts now uses providers)
 vi.mock('../providers/tgit/gf-cli.js', () => {
@@ -181,6 +198,17 @@ vi.mock('../utils/fs.js', () => ({
   },
   readFileSafe: vi.fn().mockResolvedValue(null),
   remove: (p: string) => mockRemove(p),
+}));
+
+// Member registration lands on the teamai-reports worktree beside the clone.
+vi.mock('../utils/reports-branch.js', () => ({
+  updateReports: vi.fn(async (
+    cfg: { repo: { localPath: string } },
+    update: (worktree: string) => Promise<unknown>,
+  ) => {
+    await update(`${cfg.repo.localPath}-reports`);
+    return true;
+  }),
 }));
 
 vi.mock('../types.js', async (importOriginal) => {
@@ -556,6 +584,183 @@ describe('init', () => {
     });
   });
 
+  describe('provider declared by the team repo', () => {
+    const GITEA_REPO = 'http://gitea.example.test:3000/agent/team.git';
+    const originalEnv = { ...process.env };
+
+    function teamConfigDeclaring(provider: string) {
+      return {
+        team: 'my-team',
+        repo: GITEA_REPO,
+        provider,
+        reviewers: [],
+        sharing: {
+          skills: {},
+          rules: { enforced: [] },
+          docs: { localDir: '~/.teamai/docs' },
+          env: { injectShellProfile: true },
+        },
+        toolPaths: {},
+      } as never;
+    }
+
+    /** Simulate an existing clone of the team repo so no real `git clone` runs. */
+    function reuseExistingClone(): void {
+      pathExistsFn = (p: string) => p === localPath;
+      (fse.pathExists as any).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    }
+
+    beforeEach(() => {
+      delete process.env.GITEA_URL;
+      delete process.env.TEAMAI_GITEA_HOST;
+      delete process.env.GITEA_ACCESS_TOKEN;
+      delete process.env.GITEA_PAT;
+    });
+
+    afterEach(async () => {
+      process.env = { ...originalEnv };
+      vi.unstubAllGlobals();
+      // clearAllMocks keeps implementations; restore the file-level default.
+      vi.mocked((await import('../config.js')).loadTeamConfig).mockResolvedValue(null);
+    });
+
+    it('registers the Gitea login, not the git identity, when teamai.yaml declares gitea', async () => {
+      process.env.GITEA_TOKEN = 'gta_secret';
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ login: 'qinyuanj' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      reuseExistingClone();
+      const { loadTeamConfig } = vi.mocked(await import('../config.js'));
+      loadTeamConfig.mockResolvedValue(teamConfigDeclaring('gitea'));
+      const { writeFile } = vi.mocked(await import('../utils/fs.js'));
+      // --force skips the reviewer prompt; answer the primary-role picker.
+      questionAnswers = ['1'];
+
+      await init({ repo: GITEA_REPO, scope: 'user', force: true });
+
+      expect(mockExit).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls[0][0]).toBe('http://gitea.example.test:3000/api/v1/user');
+      expect(writeFile).toHaveBeenCalledWith(
+        path.join(`${localPath}-reports`, 'members', 'qinyuanj.yaml'),
+        expect.any(String),
+      );
+      expect(saveLocalConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'qinyuanj' }),
+      );
+    });
+
+    it('exits non-zero naming GITEA_TOKEN, writing no member file or local config, when no token is set', async () => {
+      delete process.env.GITEA_TOKEN;
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      reuseExistingClone();
+      const { loadTeamConfig } = vi.mocked(await import('../config.js'));
+      loadTeamConfig.mockResolvedValue(teamConfigDeclaring('gitea'));
+      const { writeFile } = vi.mocked(await import('../utils/fs.js'));
+      const { log } = await import('../utils/logger.js');
+
+      await init({ repo: GITEA_REPO, scope: 'user', force: true });
+
+      expect(mockExit).toHaveBeenCalledWith(1);
+      const errors = vi.mocked(log.error).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(errors).toMatch(/GITEA_TOKEN/);
+      const memberWrites = writeFile.mock.calls.filter(([p]) => String(p).includes(`${path.sep}members${path.sep}`));
+      expect(memberWrites).toEqual([]);
+      expect(saveLocalConfig).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['declares provider: git', () => teamConfigDeclaring('git')],
+      ['has no teamai.yaml yet', () => null],
+    ])('keeps the git identity when the team repo %s', async (_label, config) => {
+      process.env.GITEA_TOKEN = 'gta_secret';
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      reuseExistingClone();
+      const { loadTeamConfig } = vi.mocked(await import('../config.js'));
+      loadTeamConfig.mockResolvedValue(config());
+      questionAnswers = ['1'];
+
+      await init({ repo: GITEA_REPO, scope: 'user', force: true });
+
+      expect(mockExit).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockSpinner.succeed).toHaveBeenCalledWith(expect.stringMatching(/^Using Git identity \S+/));
+    });
+  });
+
+  describe('provider declared by a single-repo .teamai/teamai.yaml (teamai init .)', () => {
+    const REMOTE = 'http://gitea.example.test:3000/agent/app.git';
+    const cwd = process.cwd();
+    const originalEnv = { ...process.env };
+
+    beforeEach(async () => {
+      delete process.env.GITEA_URL;
+      delete process.env.TEAMAI_GITEA_HOST;
+      delete process.env.GITEA_ACCESS_TOKEN;
+      delete process.env.GITEA_PAT;
+      mockGit.raw.mockResolvedValue(`${REMOTE}\n`);
+      // cwd is a git repo whose .teamai/teamai.yaml already exists (a teammate's clone).
+      pathExistsFn = (p: string) =>
+        p === path.join(cwd, '.git') || p === path.join(cwd, '.teamai', 'teamai.yaml');
+      vi.mocked((await import('../config.js')).loadTeamConfig).mockResolvedValue({
+        team: 'app',
+        mode: 'self',
+        repo: REMOTE,
+        provider: 'gitea',
+        reviewers: [],
+        sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: './.teamai/docs' }, env: { injectShellProfile: true } },
+        toolPaths: {},
+      } as never);
+    });
+
+    afterEach(async () => {
+      process.env = { ...originalEnv };
+      vi.unstubAllGlobals();
+      mockGit.raw.mockRejectedValue(new Error('no such remote'));
+      vi.mocked((await import('../config.js')).loadTeamConfig).mockResolvedValue(null);
+    });
+
+    it('authenticates with the Gitea instance derived from origin and saves that login', async () => {
+      process.env.GITEA_TOKEN = 'gta_secret';
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ login: 'qinyuanj' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const { saveLocalConfigForScope } = vi.mocked(await import('../config.js'));
+      questionAnswers = ['1'];
+
+      await init({ repoPositional: '.', force: true, dryRun: true });
+
+      expect(fetchMock.mock.calls[0][0]).toBe('http://gitea.example.test:3000/api/v1/user');
+      expect(saveLocalConfigForScope).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'qinyuanj' }),
+        'project',
+        cwd,
+      );
+    });
+
+    it('exits non-zero naming GITEA_TOKEN without saving a local config when no token is set', async () => {
+      delete process.env.GITEA_TOKEN;
+      vi.stubGlobal('fetch', vi.fn());
+      const { saveLocalConfigForScope } = vi.mocked(await import('../config.js'));
+      const { log } = await import('../utils/logger.js');
+
+      await init({ repoPositional: '.', force: true, dryRun: true });
+
+      expect(mockExit).toHaveBeenCalledWith(1);
+      const errors = vi.mocked(log.error).mock.calls.map((c) => String(c[0])).join('\n');
+      expect(errors).toMatch(/GITEA_TOKEN/);
+      expect(saveLocalConfigForScope).not.toHaveBeenCalled();
+    });
+  });
+
   describe('deploys built-in skills after init', () => {
     it('calls deployBuiltinSkills with teamConfig and skipRecall when loadTeamConfig returns non-null', async () => {
       let cloneDone = false;
@@ -593,6 +798,63 @@ describe('init', () => {
         expect.anything(),
         expect.objectContaining({ skipRecall: expect.any(Boolean) }),
       );
+    });
+  });
+
+  describe('member registration', () => {
+    afterEach(() => {
+      process.exitCode = undefined;
+      // clearAllMocks keeps implementations; don't leak a missing identity.
+      mockGit.getConfig.mockImplementation(configuredIdentity);
+    });
+
+    it('stops before registering when the git identity is missing, with the same fix as `members register`', async () => {
+      let cloneDone = false;
+      pathExistsFn = (p: string) => (p === localPath ? cloneDone : false);
+      mockGfRepoClone.mockImplementation(() => {
+        cloneDone = true;
+      });
+      const { loadTeamConfig } = await import('../config.js');
+      vi.mocked(loadTeamConfig).mockResolvedValue({
+        team: 'my-team',
+        repo: 'https://git.woa.com/HyperAI/teamai-test.git',
+        provider: 'tgit',
+        reviewers: [],
+        sharing: {
+          skills: {},
+          rules: { enforced: [] },
+          docs: { localDir: '~/.teamai/docs' },
+          env: { injectShellProfile: true },
+        },
+        toolPaths: {},
+      } as never);
+      // user.name is set per-repo by init, but no email anywhere: git would
+      // refuse the registration commit with "Author identity unknown".
+      mockGit.getConfig.mockImplementation(async (key: string) => ({
+        value: key === 'user.email' ? null : 'testuser',
+      }) as never);
+      // Would configure reviewers if asked: that commit needs an author too.
+      questionAnswers = ['y', 'alice'];
+
+      await init({ repo: 'https://git.woa.com/HyperAI/teamai-test.git', scope: 'user', role: 'hai' });
+
+      const { log } = await import('../utils/logger.js');
+      const { writeFile } = await import('../utils/fs.js');
+      const { askConfirmation } = await import('../utils/prompt.js');
+      const prompts = vi.mocked(askConfirmation).mock.calls.map((c) => String(c[0]));
+      expect(prompts.some((p) => p.includes('reviewers'))).toBe(false);
+      const errors = vi.mocked(log.error).mock.calls.map((c) => String(c[0]));
+      const hints = [...errors, ...vi.mocked(log.info).mock.calls.map((c) => String(c[0]))];
+
+      expect(errors.some((l) => l.includes('Git identity is not configured'))).toBe(true);
+      expect(hints.some((l) => l.includes('git config --global user.email'))).toBe(true);
+      expect(hints.some((l) => l.includes('teamai members register'))).toBe(true);
+      // Nothing half-registered: no member file written, no commit attempted.
+      const memberWrites = vi.mocked(writeFile).mock.calls.filter((c) => String(c[0]).includes(`${path.sep}members${path.sep}`));
+      expect(memberWrites).toEqual([]);
+      expect(mockGit.commit).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(mockExit).not.toHaveBeenCalled();
     });
   });
 

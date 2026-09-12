@@ -70,19 +70,31 @@ Skills、Rules、MCP 等 Agent 能用的资源都可以分享：
 
 ### 安装
 
+本分支增加了 Gitea provider，发布在内部 Gitea registry，不在公共 npm 上。
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm install -g @agent/teamai-cli
 ```
+
+读取 registry 是匿名的，安装不需要 token。这里必须用 `npm config set`，因为全局安装不会读取项目目录下的 `.npmrc`。
+
+上游版本在公共 npm 上，用 `npm install -g teamai-cli` 安装，但不含 Gitea provider。
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/your-org/your-repo`。
+在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/your-org/your-repo`。
+
+> **Gitea：**`teamai init` 前先设置 `GITEA_TOKEN`（Gitea access token）。管理员首次 init 还需设置 `GITEA_URL`（如 `http://lzxsvn:3000`），新生成的 `teamai.yaml` 才会记下 `provider: gitea`。此后成员可以不设 `GITEA_URL`：init 会读取仓库声明的 provider，并从仓库 URL 取 Gitea 实例地址。token 缺失或无效时 init 直接报错退出，不会用 Git `user.name` 注册成员。
 
 > **还没有团队仓库？** 可以从内置了成套 skills、rules、review agents 的模板起步。浏览 [teamai-hub](https://github.com/teamai-hub) org，点 **Fork** 生成自己的仓库，再对它执行 `teamai init`。
 
 ### 团队成员
 
 ```bash
+# Gitea access token（Gitea → 设置 → 应用 → 生成令牌）
+export GITEA_TOKEN=<your-gitea-token>
+
 # 二选一：按你想要的安装范围选择其中一条
 
 # 项目级初始化（默认，资源安装到项目目录下）

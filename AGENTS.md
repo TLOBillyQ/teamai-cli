@@ -22,7 +22,7 @@ TypeScript, Node 20+, tsup (ESM), Vitest. Commands: `npm run build`, `npx tsc --
 `npm run build` 后用真实 CLI 对本次改动做完整端到端验证（不能只跑 type check / unit test）。Test Plan 每一项必须实际通过，测试报告贴进 PR。
 
 - Agent：Claude、Codex、CodeBuddy、OpenCode
-- Provider：`git`、`gitlab`、`github`
+- Provider：`git`、`gitlab`、`github`、`gitea`
 
 ## Code Review Rules
 

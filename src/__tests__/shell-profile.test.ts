@@ -26,6 +26,8 @@ describe('detectShellProfile', () => {
     homeDir = path.join(tmpDir, 'home');
     await fse.ensureDir(homeDir);
     vi.stubEnv('HOME', homeDir);
+    // Cases that exercise a specific shell override this host-independent default.
+    vi.stubEnv('SHELL', '');
   });
 
   afterEach(async () => {

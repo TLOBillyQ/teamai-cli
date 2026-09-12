@@ -224,6 +224,14 @@ membersCmd
     await listMembers(globalOpts);
   });
 
+membersCmd
+  .command('register')
+  .description('Register yourself as a team member (idempotent; retries a failed init registration)')
+  .action(async () => {
+    const { registerMember } = await import('./members.js');
+    await registerMember();
+  });
+
 program
   .command('remove <type> <names...>')
   .description('Remove resource(s) from team repo and all local AI tools (type: skills|rules|agents|mcp)')

@@ -70,19 +70,31 @@ Skills, rules, MCP servers, and other agent resources can all be shared:
 
 ### Install
 
+This fork adds the Gitea provider and is published to the internal Gitea registry, not to public npm.
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm install -g @agent/teamai-cli
 ```
+
+Reading the registry is anonymous, so no token is needed to install. `npm config set` is required because a project-local `.npmrc` is not consulted by a global install.
+
+Upstream releases are on public npm as `npm install -g teamai-cli`, but they do not include the Gitea provider.
 
 ### Team admin / solo user
 
-Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/your-org/your-repo`.
+Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/your-org/your-repo`.
+
+> **Gitea:** set `GITEA_TOKEN` (a Gitea access token) before `teamai init`. The admin's first init also needs `GITEA_URL` (for example, `http://lzxsvn:3000`) so the new `teamai.yaml` records `provider: gitea`. After that, members can leave `GITEA_URL` unset: init reads the declared provider and takes the Gitea instance from the repo URL. Without a working token, init exits with an error instead of registering you under your Git `user.name`.
 
 > **No team repo yet?** Start from a template pre-loaded with production-ready skills, rules, and review agents. Browse the [teamai-hub](https://github.com/teamai-hub) org, click **Fork**, then `teamai init` against your new repo.
 
 ### Team members
 
 ```bash
+# Gitea access token (Gitea → Settings → Applications → Generate Token)
+export GITEA_TOKEN=<your-gitea-token>
+
 # Choose one, depending on where you want resources installed
 
 # Project-scope init (default, resources installed under the project directory)

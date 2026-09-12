@@ -79,10 +79,21 @@ describe('parseGenericGitRepoInput', () => {
     ).httpsUrl).toBe('git@code.qschou.com:Enterprise/arb-workflow-kit.git');
   });
 
-  it('rejects insecure HTTP and does not echo query-string secrets', () => {
+  it('keeps plain HTTP as-is for intranet hosts', () => {
+    const info = parseGenericGitRepoInput('http://code.qschou.com/Enterprise/arb-workflow-kit.git');
+    expect(info.httpsUrl).toBe('http://code.qschou.com/Enterprise/arb-workflow-kit.git');
+    expect(info.owner).toBe('Enterprise');
+    expect(info.repo).toBe('arb-workflow-kit');
+
+    // Port and path-less .git suffix survive too.
+    expect(parseGenericGitRepoInput('http://code.internal:3000/team/skills').httpsUrl)
+      .toBe('http://code.internal:3000/team/skills.git');
+  });
+
+  it('rejects embedded credentials over HTTP and does not echo query-string secrets', () => {
     expect(() => parseGenericGitRepoInput(
-      'http://code.qschou.com/Enterprise/arb-workflow-kit.git',
-    )).toThrow(/plain HTTP is not supported/);
+      'http://oauth2:secret@code.qschou.com/Enterprise/arb-workflow-kit.git',
+    )).toThrow(/Do not embed credentials/);
 
     let message = '';
     try {
