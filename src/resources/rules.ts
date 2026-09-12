@@ -596,6 +596,7 @@ export class RulesHandler extends ResourceHandler {
       if (!toolPath.claudemd) continue;
       if (inlinesRulesIntoInstructions(tool)) continue;
       const baseDir = resolveToolBaseDir(tool, localConfig);
+      const claudeMdPath = path.join(baseDir, toolPath.claudemd);
       try {
         const content = await readFileSafe(claudeMdPath);
         if (!content || !content.includes(TEAMAI_RULES_START)) continue;

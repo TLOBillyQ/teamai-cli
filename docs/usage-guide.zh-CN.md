@@ -604,6 +604,8 @@ teamai pull --dry-run    # 试运行，不实际修改
 该 namespace 不再活跃后，下一次 pull 会重新下发根目录条目。两个活跃 namespace 定义同名 skill 或 agent 时，它们会争用同一个安装文件，因此 pull 会报错并列出两个文件，本次运行不更新该类型，已安装的内容保持不变（skills 在 recall 中已有的索引也保持不变）；其他资源类型照常同步。两个活跃 namespace 定义同名 rule 或共享指令时，两者都会下发，因为它们各有自己的位置（本地的 `rules/<ns>/`、区块中各自的一段）；只有根目录的那一份会让位。`push` 会把被替换条目的修改写回其 namespace，而不会写到根目录；recall 只索引你实际收到的 skills 和 rules，而不是仓库中的全部内容。无法使用的替换项不会替换任何内容：没有 `SKILL.md` 的 skill 目录不会下发，pull 会点名提示；agent 文件无法解析时，它原本要替换的 agent 保持安装。`teamai doctor` 会以提示的形式列出每一处替换。未配置角色或项目时行为不变：所有 namespace 与根目录并列下发，`doctor` 会列出团队仓库中重复定义的每个名称。
 
 项目可能需要覆盖的共享内容应放在根目录，而不是放在每个角色都会激活的 namespace 中：根目录条目会让位给活跃的 namespace，namespace 条目则不会。例如，公司的 `rules/code-style.md` 放在根目录；需要不同规范的 checkout 项目添加 `rules/checkout/code-style.md`。激活了 `checkout` 的成员拿到项目版本，其他人仍使用共享版本。如果共享规则放在 `rules/common/code-style.md`，checkout 成员就会同时收到两份。
+**Skill 名称在所有分组中必须唯一。** 团队仓库中的 skill 可以放在 `skills/<name>/`，也可以放在一层分组下 `skills/<group>/<name>/`。分组不参与安装后的名称（两者都会拍平安装为 `<工具 skills 目录>/<name>`），因此 skill 名称在顶层和所有分组之间必须唯一。若同一名称出现在多个路径（例如 `skills/mattpocock/code-review` 与 `skills/team/code-review`），`teamai pull` 会跳过该 skill（此前 pull 已安装的副本保持不动），安装其余内容并以非零状态退出，`teamai push` 会拒绝推送该 skill 并以非零状态退出（其他变更仍会列出）；两者都会列出所有冲突路径。将其中一个改名即可解决。通过标签订阅的 skill 也参与同一检查：若与本次 pull 将安装的其他 skill 同名，也会同样被跳过。分组之间没有优先级规则。
+
 
 ### 团队包
 
@@ -1763,7 +1765,7 @@ Kimi Code CLI 是内置目标（`--agent kimi`），与其他工具一样通过 
 
 - **Skills** 落在 `.kimi-code/skills/`（Kimi 直接扫描该目录，以及 `.agents/skills/`）。
 - **Subagents** 使用[当前 Kimi Markdown 格式](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents)写入 `.kimi-code/agents/*.md`：`name`、`description` 和 YAML 列表形式的 `tools` 允许列表，工具名区分大小写，例如 `Bash`、`Read`、`Grep`、`Glob`（`Task` 映射为 `Agent`）。旧版 TeamAI 输出中已知的 Python 工具标识会在渲染和反向同步时转换为当前名称；未知名称及 `mcp__jira__*` 等 MCP 模式原样保留。显式 `tools: []` 仍禁用全部工具。`tool_extras.kimi` 中覆盖的 `tools` 和 `disallowedTools` 也执行相同转换。升级 TeamAI 后运行 `teamai pull --force`，即可刷新已有的内置和团队代理；重复 pull 会保留修正后的名称。此目标支持当前 Markdown 代理，不支持旧 Python CLI 独立的 `version`/`agent` YAML 格式。不输出通用 `model` 字段；Kimi 独有字段（`whenToUse`、`disallowedTools`、`subagents`、`override`）经由 `tool_extras.kimi` 往返。
-- **Rules** 会被**内联**进 `.kimi-code/AGENTS.md` 的 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`），这是 Kimi 唯一会注入系统提示的文件。规则的 frontmatter（`paths:` 等）会被去掉，因此按路径限定的规则在 Kimi 里对所有任务生效；区块之外你自己的内容保持不变；团队最后一条 rule 消失时区块随之移除。不会往 `.kimi-code/rules/` 拷任何文件，因为 Kimi 永远不会读它。
+- **Rules** 会被**内联**进 `.kimi-code/AGENTS.md` 的 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`），这是 Kimi 唯一会注入系统提示的文件。规则按其在团队仓 `rules/` 目录下的路径排序拼接（按名称排序，子目录在其所在位置展开），因此不论文件系统如何，各台机器生成的区块内容一致。规则的 frontmatter（`paths:` 等）会被去掉，因此按路径限定的规则在 Kimi 里对所有任务生效；区块之外你自己的内容保持不变；团队最后一条 rule 消失时区块随之移除。不会往 `.kimi-code/rules/` 拷任何文件，因为 Kimi 永远不会读它。
 - **Culture、共享指令和 recall 区块**同样注入这份 `.kimi-code/AGENTS.md`（recall 区块与内置 `teamai-recall` 子代理仅在 recall 启用时注入，见 `teamai recall status`）。以上都只在该作用域存在 `.kimi-code/`（或你显式启用了 `kimi`）时发生——teamai 绝不会为不用 Kimi 的人创建它。
 - **Hooks** 写在用户级 `~/.kimi-code/config.toml`（见上文 hooks 说明）。该目录尚不存在时，pull 会跳过（启用了 kimi 时输出 `Kimi Code hooks skipped: ...` 警告）——先运行一次 Kimi Code，再重新 pull 即可。`teamai doctor` 会检查 `config.toml` 中是否包含 teamai 条目。
 
@@ -1844,6 +1846,8 @@ teamai remove rules <name> --force   # 跳过确认，用于脚本和 CI
 仅当所有检查通过时，`teamai doctor` 才以状态码 0 退出；任一检查失败时以状态码 1 退出。尚未初始化时，它只报告缺少配置，不会臆测 Git 托管平台。手动执行 `teamai pull` 结束时会运行同一批检查（不含托管平台相关的检查，也不含本次 pull 已经自行报告过的检查）。被标记为 informational 的检查——目前只有 `No stale env blocks left behind`——仍会计入 `doctor` 的退出码，但 pull 不会把它的失败并入 `Pull finished, but N check(s) failed`：早期安装留下的遗留文件属于清理事项，不代表这次 pull 弄坏了什么，因此依旧会被点名，只是单独用一行更轻的提示呈现。
 
 除了托管平台、clone、配置和 hook 检查之外，`doctor` 还会验证落到本机上的内容。`<tool> is installed` 在 `enabledAgents` 列出了不会收到任何内容的工具时失败——这正是 pull 报告成功、而该工具什么都没收到的情况。它使用与同步相同的解析逻辑，因此像 OpenClaw 这样把 skills 放在 workspace 目录而非工具根目录的工具，会在同步真正写入的位置被判断。工具已安装时也会作为通过项报告，因此 `--json` 无论哪种情况都会为每个已启用工具给出一条记录。pull 结束时的检查只覆盖它从当前目录解析出的那个 scope；其他 scope 请在对应目录下运行 `teamai doctor`。`Skills delivered to <tool>` 会把角色命名空间、标签订阅与排除规则解析出的 skill 集合，与每个已安装工具磁盘上的内容比对：从未送达的 skill 与送达但不可读的 skill 会分别报告——后者指 `SKILL.md` 缺失、frontmatter 无法解析，或其 `name` 与目录名不一致，导致 agent 永远发现不了它。`Team docs delivered` 将你应收到的文档（不含未激活的 docs namespace）与 `sharing.docs.localDir` 比对（它只有一个目标目录，而非每个工具一个）；每个应有的文档都必须是可读取的文件，因此占用了该名字的目录或断链接也算缺失。它还会将本地多余的非隐藏文件报告为过期文档，即使团队文档已经删空也会检查；本地隐藏文件会保留，不会使检查失败，未激活 namespace 中团队文档的本地副本也不会：pull 会删除未修改的副本，并点名你修改过的副本。`doctor` 还会输出提示，它们只是信息，不是失败的检查。每条提示指出一个在本机替换了根目录条目的 namespace skill、agent、rule、共享指令文件、env 变量、hook、MCP server 或团队模型配置（`rules: "style" from rules/checkout/style.md replaces rules/style.md`）。当某个 namespace 提供了 env 变量、hook、MCP server 或团队模型配置时，还会有一条提示按来源统计该类型的条目（`env: 3 received here (2 root, 1 checkout)`）。未配置角色或项目时，提示改为列出团队仓库中重复定义的每个文件，以及在根文件中重复出现的每个 env 变量、hook 或 MCP server 名称。
+
+pull 与 doctor 共用 skill 选择逻辑。所选分组或标签订阅中，如果不同路径的 skill 安装名相同，doctor 会将 `Skills to deliver can be resolved` 报为失败并列出冲突路径，不再任选一个副本判断是否已送达。pull 跳过重名项，清理时保留团队仓库来源不唯一的副本。
 
 `Rules delivered to <tool>` 与 `Agents delivered to <tool>` 对另外两类按工具下发的资源做同样的事，并且都向 handler 询问落点，而不是自行拼路径：rule 的文件名和内容因工具而异（`.md` 原样、`.mdc` 带派生的 `globs`/`alwaysApply`、`.instructions.md` 带 `applyTo`），agent 的落点来自渲染结果，且由 `targets:` 决定哪些工具应当收到。已送达的 rule 会与 handler 为该工具渲染出的字节逐一比对，而不只是检查该工具所需的键是否存在：`globs` 与团队 rule 的 `paths:` 不再一致的 `.mdc`，即使 `alwaysApply` 取值合法，也会作用到错误的文件上；这里会报告为 `delivered from an older copy`——正文漂移的副本同样如此，因为两者都写入成功，却都是错的。agent 会与渲染结果逐字节比对：旧版 spec 留下的副本（普通 pull 会跳过团队仓库未变化的 scope，它可能一直留在那里）报告为 `delivered from an older spec`，而不是当作已送达。`Every team agent reaches a tool` 会指出在任何已安装工具上都无法渲染的 agent，通常是 spec 解析失败，或 `targets:` 只列了本机没有的工具。这两项仅在 `doctor` 中运行：它们会按工具读取每条 rule、解析每个 agent，放进 pull 结束时的检查会耗尽其时间预算。
 
@@ -2085,7 +2089,6 @@ team: my-team
 description: 团队 AI 资源仓库
 repo: https://github.com/yourorg/yourrepo.git
 provider: github
-# scope: 若存在则忽略——本机安装位置由 `teamai init --scope` 决定
 
 reviewers:
   - reviewer1
@@ -2096,8 +2099,6 @@ packages:
       version: "*"
 
 sharing:
-  rules:
-    enforced: [code-review-guide]
   recall:
     enabled: false             # 可选；成员可在本地覆盖
   docs:
@@ -2119,9 +2120,37 @@ sharing:
         secret: my-signing-key # 可选，设置后启用 X-TeamAI-Signature 头
         timeout: 5000          # 可选，单次请求超时（毫秒，默认 5000）
         retries: 3             # 可选，失败重试次数（默认 3）
+
+toolPaths:                     # 可选；合并到内置默认表之上（见下文）
+  claude:
+    skills: .claude/custom-skills
 ```
 
 `teamai pull` 将你收到的 `docs/` 非隐藏文件（见[按 namespace 分发 docs](#docs文档)）镜像同步到 `sharing.docs.localDir`：团队库删除的文档，本地也会一并删除，包括删除最后一篇文档或整个团队文档目录的情况。过期的空目录也会删除，隐藏文件和隐藏目录会保留。请使用专用文档目录，因为仅存在于本地的草稿也会删除。目标目录若与团队仓库重叠，或包含主目录／项目根目录，会被拒绝同步；若目标本身就是团队的 `docs/`，则无需复制或清理。同名路径的文件／目录类型变化会先准备替换内容，替换失败时恢复冲突的本地条目。若待替换目录含本地隐藏条目，需先移走这些条目；同步不会丢弃它们。复制失败时不会继续清理。`teamai pull --dry-run` 只预览同步，不修改文件；对于旧版 CLI 已同步过的版本，可用 `teamai pull --force` 清理历史残留。
+
+`teamai.yaml` 中当前 CLI 版本不认识的键会被忽略，旧键或拼错的键不会导致加载失败；`teamai doctor` 会以警告（不算失败）列出这些键。
+
+#### `toolPaths`
+
+`toolPaths` 为每个工具（`claude`、`codex`、`kimi` 等）指定 TeamAI 的安装路径：`skills`、`rules`、`settings`、`claudemd`、`agents`、`mcp`、`mcpProject`，以及 `userScope`（user scope 下对 `skills` / `rules` / `agents` 的覆盖）。TeamAI 为每个支持的工具内置了一张默认表，大多数团队仓无需配置 `toolPaths`。
+
+团队仓配置了 `toolPaths` 时，会按工具、按字段合并到内置默认表之上：
+
+- 团队未列出的内置工具，沿用默认配置。
+- 团队设置的字段只替换该字段，未设置的字段沿用默认值。`userScope` 同样逐字段合并。
+- 不在内置表中的工具，按原样加入。
+- `false` 移除一个工具或单个字段。`null`（或 `~`、空值，即 YAML 中键下只有注释时的解析结果）沿用默认值，与不写该键相同。
+
+```yaml
+toolPaths:
+  claude:
+    skills: .claude/custom-skills   # 只修改 claude 的 skills 路径，其他工具和字段沿用默认值
+  kimi: false                       # 不再向 Kimi 安装
+  codex:
+    rules: false                    # 保留 codex，但去掉其 rules 路径
+```
+
+只写需要修改的部分。把整张表抄进团队仓仍然可用，但其中列出的每个字段都会固定为旧值，之后这些默认值的变更将不会同步到团队；抄表之后新增的工具和字段会自动补齐。
 
 ### config.yaml（本地配置）
 

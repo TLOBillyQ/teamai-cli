@@ -17,6 +17,8 @@ import {
 } from './fs.js';
 import { getFileContentAtRev, getFileContentWhenAdded } from './git.js';
 import { isToolInstalledForConfig, ResourceHandler } from '../resources/base.js';
+import { SkillsHandler } from '../resources/skills.js';
+import { findDuplicateSkillNames } from '../resources/skill-duplicates.js';
 import { ruleFileExtensionForTool, usesCopilotInstructions, usesCursorMdcRules } from '../resources/rule-format.js';
 import { teamRuleToCursorMdc, cursorMdcBodyEqualsTeamMd } from '../resources/cursor-mdc.js';
 import { teamRuleToCopilotInstructions, copilotInstructionsBodyEqualsTeamMd } from '../resources/copilot-instructions.js';
@@ -212,23 +214,14 @@ async function syncSkillsToLocal(
   const teamSkillsDir = path.join(repoPath, 'skills');
   if (!await pathExists(teamSkillsDir)) return;
 
-  // Build map of team repo skill dirs (handling both flat and namespaced layout)
+  // Build map of team repo skill dirs (handling both flat and namespaced layout).
+  // A name found at more than one path is ambiguous — push refuses it, so never
+  // overwrite the local copy with an arbitrarily chosen group's version.
+  const teamSkills = await new SkillsHandler().scanTeamForPull(teamConfig, localConfig);
+  const ambiguous = new Set(findDuplicateSkillNames(teamSkills).map((d) => d.name));
   const teamSkillPaths = new Map<string, string>(); // skillName → absolute path in team repo
-  const topDirs = await listDirs(teamSkillsDir);
-  for (const dir of topDirs) {
-    const dirPath = path.join(teamSkillsDir, dir);
-    if (await pathExists(path.join(dirPath, 'SKILL.md'))) {
-      // Flat skill at top level
-      teamSkillPaths.set(dir, dirPath);
-    } else {
-      // Namespace directory — scan subdirectories
-      const subDirs = await listDirs(dirPath);
-      for (const subDir of subDirs) {
-        if (!teamSkillPaths.has(subDir)) {
-          teamSkillPaths.set(subDir, path.join(dirPath, subDir));
-        }
-      }
-    }
+  for (const item of teamSkills) {
+    if (!ambiguous.has(item.name)) teamSkillPaths.set(item.name, item.sourcePath);
   }
 
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {

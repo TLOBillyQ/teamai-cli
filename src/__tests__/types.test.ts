@@ -149,6 +149,120 @@ describe('TeamaiConfigSchema', () => {
 
 });
 
+describe('TeamaiConfigSchema toolPaths merge over defaults', () => {
+  const base = { team: 'test-team', repo: 'https://example.com/test/repo.git' };
+  const defaults = TeamaiConfigSchema.parse(base).toolPaths;
+
+  it('overrides only the one field a team sets and keeps every other default tool', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { claude: { skills: '.claude/custom-skills' } },
+    });
+    expect(result.toolPaths.claude).toEqual({
+      skills: '.claude/custom-skills',
+      rules: '.claude/rules',
+      settings: '.claude/settings.json',
+      claudemd: '.claude/CLAUDE.md',
+      agents: '.claude/agents',
+      mcp: '.claude.json',
+      mcpProject: '.mcp.json',
+    });
+    expect(Object.keys(result.toolPaths).sort()).toEqual(Object.keys(defaults).sort());
+    expect(result.toolPaths.codex).toEqual(defaults.codex);
+    expect(result.toolPaths.kimi).toEqual(defaults.kimi);
+  });
+
+  it('fills fields a table pinned from an older release is missing', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { kimi: { skills: '.kimi-code/skills' } },
+    });
+    expect(result.toolPaths.kimi).toEqual({
+      skills: '.kimi-code/skills',
+      agents: '.kimi-code/agents',
+      claudemd: '.kimi-code/AGENTS.md',
+    });
+  });
+
+  it('removes a tool whose entry is false', () => {
+    const result = TeamaiConfigSchema.parse({ ...base, toolPaths: { kimi: false } });
+    expect(result.toolPaths).not.toHaveProperty('kimi');
+    expect(result.toolPaths.claude).toEqual(defaults.claude);
+  });
+
+  it('keeps the default for a tool or field whose entry is null', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { kimi: null, claude: { rules: null, userScope: null } },
+    });
+    expect(result.toolPaths.kimi).toEqual(defaults.kimi);
+    expect(result.toolPaths.claude).toEqual(defaults.claude);
+  });
+
+  it('removes only the field set to false', () => {
+    const result = TeamaiConfigSchema.parse({ ...base, toolPaths: { claude: { rules: false } } });
+    expect(result.toolPaths.claude).toEqual({
+      skills: '.claude/skills',
+      settings: '.claude/settings.json',
+      claudemd: '.claude/CLAUDE.md',
+      agents: '.claude/agents',
+      mcp: '.claude.json',
+      mcpProject: '.mcp.json',
+    });
+  });
+
+  it('merges userScope field by field, and false removes a userScope field', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { opencode: { userScope: { skills: '.config/oc/skills', agents: false } } },
+    });
+    expect(result.toolPaths.opencode).toEqual({
+      skills: '.opencode/skills',
+      rules: '.opencode/rules',
+      agents: '.opencode/agents',
+      mcp: '.config/opencode/opencode.json',
+      mcpProject: 'opencode.json',
+      userScope: { skills: '.config/oc/skills', rules: '.config/opencode/rules' },
+    });
+  });
+
+  it('keeps a custom tool that is not in the defaults as written', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { mytool: { skills: '.mytool/skills', rules: '.mytool/rules' } },
+    });
+    expect(result.toolPaths.mytool).toEqual({ skills: '.mytool/skills', rules: '.mytool/rules' });
+    expect(result.toolPaths.claude).toEqual(defaults.claude);
+  });
+
+  it('resolves the built-in table when toolPaths is absent', () => {
+    const result = TeamaiConfigSchema.parse(base);
+    expect(result.toolPaths.claude).toEqual({
+      skills: '.claude/skills',
+      rules: '.claude/rules',
+      settings: '.claude/settings.json',
+      claudemd: '.claude/CLAUDE.md',
+      agents: '.claude/agents',
+      mcp: '.claude.json',
+      mcpProject: '.mcp.json',
+    });
+    expect(Object.keys(result.toolPaths)).toEqual([
+      'claude', 'codex', 'codex-internal', 'claude-internal', 'tclaude', 'tcodex', 'cursor', 'copilot',
+      'joycode', 'qoder', 'qoder-cn', 'kiro', 'zcode', 'omp', 'pi', 'codebuddy', 'openclaw', 'hermes', 'kimi', 'dsh',
+      'workbuddy', 'opencode',
+    ]);
+  });
+
+  it('gives each parse its own copy of the defaults', () => {
+    const first = TeamaiConfigSchema.parse(base);
+    first.toolPaths.claude.skills = 'mutated';
+    delete first.toolPaths.codex;
+    const second = TeamaiConfigSchema.parse(base);
+    expect(second.toolPaths.claude.skills).toBe('.claude/skills');
+    expect(second.toolPaths).toHaveProperty('codex');
+  });
+});
+
 describe('TeamaiConfigSchema reviewers', () => {
   const minConfig = {
     team: 'my-team',

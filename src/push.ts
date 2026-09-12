@@ -17,6 +17,7 @@ import { log, spinner } from './utils/logger.js';
 import { getHandler } from './resources/index.js';
 import { scanTeamRepoNamespaces } from './resources/skills.js';
 import { deliversEveryNamespace } from './resource-namespaces.js';
+import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
 import type {
   GlobalOptions, ResourceItem, ResourceType, LocalConfig, TeamaiConfig, State,
 } from './types.js';
@@ -31,7 +32,7 @@ import {
   resolveProjectNamespace, skillNamespacePath, withNamespace, type PlaceableType,
 } from './push-namespaces.js';
 import { askQuestion, askSelection, isInteractive } from './utils/prompt.js';
-import { pathExists, pruneEmptyDirs, readFileSafe, writeFile } from './utils/fs.js';
+import { listDirs, pathExists, pruneEmptyDirs, readFileSafe, writeFile } from './utils/fs.js';
 import { brokenTeamProfileFiles } from './models/profile.js';
 
 /**
@@ -1395,29 +1396,37 @@ async function pushCore(
       if (await pathExists(skillPath) && await pathExists(path.join(skillPath, 'SKILL.md'))) {
         const skillName = path.basename(skillPath);
 
-        // Try to detect existing namespace from team repo
+        // Detect the skill's existing location in the team repo. A name found
+        // at more than one path is ambiguous: refuse rather than pick a group.
         let namespace: string | undefined;
         let status: 'new' | 'modified' = 'new';
+        const teamMatches: Array<Pick<ResourceItem, 'name' | 'relativePath' | 'namespace'>> = [];
         const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
         if (await pathExists(teamSkillsDir)) {
-          const { listDirs } = await import('./utils/fs.js');
-          const topDirs = await listDirs(teamSkillsDir);
-          for (const dir of topDirs) {
-            const candidatePath = path.join(teamSkillsDir, dir, skillName);
-            if (await pathExists(candidatePath)) {
-              // Check if this is a namespace dir (not a direct skill)
-              const isNamespace = !await pathExists(path.join(teamSkillsDir, dir, 'SKILL.md'));
-              if (isNamespace) {
-                namespace = dir;
-              }
-              status = 'modified';
-              break;
+          const groups = new Set<string>();
+          for (const dir of await listDirs(teamSkillsDir)) {
+            // A top-level dir with SKILL.md is a flat skill, checked below.
+            if (await pathExists(path.join(teamSkillsDir, dir, 'SKILL.md'))) continue;
+            groups.add(dir);
+            if (await pathExists(path.join(teamSkillsDir, dir, skillName))) {
+              teamMatches.push({ name: skillName, relativePath: `skills/${dir}/${skillName}`, namespace: dir });
             }
           }
-          // Also check flat layout
-          if (!namespace && await pathExists(path.join(teamSkillsDir, skillName))) {
-            status = 'modified';
+          // A same-named group is a namespace, not a flat skill.
+          if (!groups.has(skillName) && await pathExists(path.join(teamSkillsDir, skillName))) {
+            teamMatches.push({ name: skillName, relativePath: `skills/${skillName}` });
           }
+        }
+        const duplicates = findDuplicateSkillNames(teamMatches);
+        if (duplicates.length > 0) {
+          // Already printed by the scan when the skill sits in a scanned tool
+          // dir; reportDuplicateSkills prints each conflict once per run.
+          reportDuplicateSkills(duplicates);
+          return;
+        }
+        if (teamMatches.length === 1) {
+          namespace = teamMatches[0].namespace;
+          status = 'modified';
         }
 
         const relPath = namespace

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { describeDeliveryConflict, resolveDesiredSkills, type DesiredSkills } from '../resources/desired.js';
+import { findDuplicateSkillNames } from '../resources/skill-duplicates.js';
 
 /** The resolved skills, failing the test on a namespace collision. */
 function resolved(result: Awaited<ReturnType<typeof resolveDesiredSkills>>): DesiredSkills {
@@ -122,6 +123,22 @@ describe('resolveDesiredSkills', () => {
 
     // backend-skill carries a tag the user is not subscribed to.
     expect(skippedByTags).toBe(1);
+  });
+
+  it('exposes a collision across groups in the team set pull diagnoses without a role', async () => {
+    await writeSkill('backend', 'shared-skill');
+    const { teamItems } = resolved(await resolveDesiredSkills(teamConfig, localConfig, null));
+    expect(findDuplicateSkillNames(teamItems)).toEqual([{
+      name: 'shared-skill', paths: ['skills/backend/shared-skill', 'skills/common/shared-skill'],
+    }]);
+  });
+
+  it('does not report a skill a tag and a role both select from one path', async () => {
+    localConfig.subscribedTags = ['shared'];
+    await fse.writeFile(path.join(repoPath, 'tags.yaml'), 'skills:\n  shared-skill: [shared]\n');
+    const { items, teamItems } = resolved(await resolveDesiredSkills(teamConfig, localConfig, rolesOver(['common'])));
+    expect(items.map((item) => item.name)).toEqual(['shared-skill']);
+    expect(findDuplicateSkillNames(teamItems)).toEqual([]);
   });
 
   it('writes nothing: doctor calls it on a machine it must not change', async () => {

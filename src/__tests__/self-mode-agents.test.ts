@@ -66,8 +66,7 @@ describe('detectHomeInstalledAgents', () => {
     await fse.ensureDir(path.join(home, '.codex'));
     await fse.ensureDir(path.join(home, '.claude'));
     const found = await detectHomeInstalledAgents();
-    // candidate order is claude, codex, cursor, copilot, pi, joycode, codebuddy, workbuddy
-    // candidate order is claude, codex, cursor, copilot, joycode, codebuddy, workbuddy, kimi
+    // candidate order is claude, codex, cursor, copilot, pi, joycode, codebuddy, workbuddy, kimi
     expect(found).toEqual(['claude', 'codex']);
   });
 
@@ -82,8 +81,7 @@ describe('detectHomeInstalledAgents', () => {
     expect(await detectHomeInstalledAgents(['cursor'])).toEqual(['cursor']);
   });
 
-  it('SELF_MODE_AGENT_CHOICES includes Pi, Copilot and JoyCode among the common coding agents', () => {
-  it('SELF_MODE_AGENT_CHOICES includes Copilot, JoyCode and Kimi among the common coding agents', () => {
+  it('SELF_MODE_AGENT_CHOICES includes Pi, Copilot, JoyCode and Kimi among the common coding agents', () => {
     expect([...SELF_MODE_AGENT_CHOICES]).toEqual([
       'claude',
       'codex',
