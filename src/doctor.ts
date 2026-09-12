@@ -1,10 +1,12 @@
 import path from 'node:path';
+import YAML from 'yaml';
 import { detectProjectConfig, loadLocalConfig, loadTeamConfig } from './config.js';
 import { pathExists, readFileSafe } from './utils/fs.js';
 import { log, setStderrOnly } from './utils/logger.js';
 import type { GlobalOptions } from './types.js';
 import {
   COPILOT_TOOL_ID,
+  TeamaiConfigSchema,
   resolveHookScope,
   resolveToolBaseDir,
   isAgentExcluded,
@@ -247,6 +249,26 @@ async function hasInstalledCodexHooks(toolPaths: TeamaiConfig['toolPaths'], base
 }
 
 /**
+ * Top-level teamai.yaml keys the current schema does not declare. zod strips them
+ * silently on load, so without this a misspelled or removed key goes unnoticed.
+ * Returns [] when teamai.yaml is missing or unparseable — the validity check
+ * reports that case.
+ */
+async function findUnrecognizedTeamConfigKeys(repoPath: string): Promise<string[]> {
+  const content = await readFileSafe(path.join(repoPath, 'teamai.yaml'));
+  if (!content) return [];
+  let raw: unknown;
+  try {
+    raw = YAML.parse(content);
+  } catch {
+    return [];
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const known = new Set(Object.keys(TeamaiConfigSchema.shape));
+  return Object.keys(raw).filter((key) => !known.has(key));
+}
+
+/**
  * Resolve the local/team configuration the checks run against. Returns null
  * when TeamAI is not initialized here — the caller decides how to report that.
  */
@@ -485,6 +507,14 @@ export async function doctor(options: DoctorOptions): Promise<boolean> {
   if (!jsonMode) {
     const scopeLabel = `${scope}${scope === 'project' && localConfig.projectRoot ? ` (${localConfig.projectRoot})` : ''}`;
     console.log(`  Scope: ${scopeLabel}\n`);
+
+    // Warning only: team repos are shared across CLI versions, so a key this
+    // version does not know may be valid for a newer one. Never fails doctor.
+    const unrecognizedKeys = await findUnrecognizedTeamConfigKeys(localConfig.repo.localPath);
+    if (unrecognizedKeys.length > 0) {
+      console.log(`  ⚠ teamai.yaml has keys this teamai version does not recognize (ignored): ${unrecognizedKeys.join(', ')}`);
+    }
+  }
   }
 
   const results = await runChecks(await buildChecks(ctx), jsonMode ? undefined : renderResult);

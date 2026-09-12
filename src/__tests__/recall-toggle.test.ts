@@ -55,7 +55,6 @@ describe('recall toggle native agent cleanup', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },

@@ -95,7 +95,7 @@ describe('pull with excluded skills', () => {
       provider: 'github',
       reviewers: [],
       sharing: {
-        skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true },
+        skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true },
       },
       toolPaths: { claude: { skills: '.claude/skills', rules: '.claude/rules' } },
     };

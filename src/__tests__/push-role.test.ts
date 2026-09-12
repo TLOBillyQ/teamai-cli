@@ -136,7 +136,7 @@ function makeTeamConfig() {
     repo: 'https://git.woa.com/test/repo.git',
     provider: 'tgit',
     reviewers: [],
-    sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '~/.teamai/docs' }, env: { injectShellProfile: true } },
+    sharing: { skills: {}, docs: { localDir: '~/.teamai/docs' }, env: { injectShellProfile: true } },
     toolPaths: {},
   };
 }

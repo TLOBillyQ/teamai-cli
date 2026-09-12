@@ -147,7 +147,6 @@ describe('pull scope isolation (issue #73)', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },

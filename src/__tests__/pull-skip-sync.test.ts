@@ -118,7 +118,6 @@ describe('pull skip-sync when repo HEAD unchanged', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -514,7 +513,6 @@ describe('pull skip-sync refreshes CLAUDE.md recall block (CLI upgrade)', () => 
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -703,7 +701,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
         recall: { enabled: true },
@@ -967,7 +964,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -1010,7 +1006,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -1070,7 +1065,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -1126,7 +1120,6 @@ describe('enabledAgents whitelist on pull inject, skip-sync, and cleanup (#510)'
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },

@@ -64,7 +64,6 @@ describe('co-author reconcile', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '~/.teamai/docs' },
         env: { injectShellProfile: false },
       },

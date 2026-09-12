@@ -38,7 +38,6 @@ function buildTeamConfig(
     reviewers: [],
     sharing: {
       skills: {},
-      rules: { enforced: [] },
       docs: { localDir: '' },
       env: { injectShellProfile: true },
     },

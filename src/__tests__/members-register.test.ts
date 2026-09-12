@@ -67,7 +67,7 @@ function mockInit(repoPath: string, kind?: 'self' | 'http') {
       repo: 'https://git.example.com/team/repo.git',
       provider: 'git' as const,
       reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       toolPaths: {},
     },
   } as Awaited<ReturnType<typeof requireInit>>);

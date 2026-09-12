@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { formatDuplicateSkills } from './resources/skill-duplicates.js';
 import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { expandHome, listFilesRecursive, pathExists, readFileSafe } from './utils/fs.js';
@@ -155,17 +156,18 @@ export async function buildDeliveryChecks(ctx: DoctorContext): Promise<Check[]> 
   let items: ResourceItem[];
   try {
     const roleContext = await buildRolePullContext(localConfig);
-    ({ items } = await resolveDesiredSkills(teamConfig, localConfig, roleContext));
+    const desired = await resolveDesiredSkills(teamConfig, localConfig, roleContext);
+    if (desired.duplicates.length > 0) throw new Error(formatDuplicateSkills(desired.duplicates));
+    items = desired.items;
   } catch (e) {
-    // A team repo whose active namespaces collide cannot say what should be
-    // delivered — `pull` aborts the scope with this same message. The command
-    // whose job is explaining bad state must report it, not stack-trace on it.
+    // An ambiguous selection or unreadable manifest must be reported instead
+    // of checking an arbitrary copy or throwing out of doctor.
     return [{
       name: 'Skills to deliver can be resolved',
       source: 'local',
       check: async () => false,
       fix: `${(e as Error).message}. Until the team repo is fixed, `
-        + 'pull cannot sync skills for this role.',
+        + 'pull cannot deliver the conflicting skills.',
     }];
   }
   if (items.length === 0) return [];

@@ -136,7 +136,6 @@ describe('pull role-aware sync and cleanup', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -213,7 +212,6 @@ describe('pull role-aware sync and cleanup', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },
@@ -554,7 +552,106 @@ describe('pull role-aware sync and cleanup', () => {
     await expect(scanRoleAwareSkills(
       localConfig,
       { knowledge: ['common', 'hai'], skills: ['common', 'hai'], learnings: [], agents: [] },
-    )).rejects.toThrow(/Duplicate skill "shared-skill"/);
+    )).rejects.toThrow('Duplicate skill "shared-skill" found in active namespaces "common" and "hai"');
+  });
+
+  describe('duplicate skill names across groups', () => {
+    const noRoleConfig = (): LocalConfig => ({
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+      updatePolicy: 'auto',
+      additionalRoles: [],
+      scope: 'user',
+    });
+
+    async function writeSkill(rel: string, body: string): Promise<void> {
+      await fse.ensureDir(path.join(repoPath, rel));
+      await fse.writeFile(path.join(repoPath, rel, 'SKILL.md'), body);
+    }
+
+    async function errorOutput(): Promise<string> {
+      const { log } = await import('../utils/logger.js');
+      return vi.mocked(log.error).mock.calls.flat().join('\n');
+    }
+
+    beforeEach(async () => {
+      const { log } = await import('../utils/logger.js');
+      const { resetReportedDuplicateSkills } = await import('../resources/skill-duplicates.js');
+      vi.mocked(log.error).mockClear();
+      resetReportedDuplicateSkills();
+      process.exitCode = undefined;
+    });
+
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it('skips a skill name two groups share, installs the rest, and exits non-zero', async () => {
+      vi.mocked(loadLocalConfigForScope).mockResolvedValue(noRoleConfig());
+      await writeSkill('skills/a/x', '# From a');
+      await writeSkill('skills/b/x', '# From b');
+      await writeSkill('skills/a/other', '# Other');
+
+      await pull({ force: true });
+
+      expect(process.exitCode).toBe(1);
+      const output = await errorOutput();
+      expect(output).toContain('Duplicate skill "x"');
+      expect(output).toContain('skills/a/x');
+      expect(output).toContain('skills/b/x');
+      expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'x'))).toBe(false);
+      expect(await fse.pathExists(path.join(homeDir, '.codex/skills', 'x'))).toBe(false);
+      expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'other', 'SKILL.md'))).toBe(true);
+    });
+
+    it('leaves a previously installed copy of an ambiguous skill alone', async () => {
+      vi.mocked(loadLocalConfigForScope).mockResolvedValue(noRoleConfig());
+      await writeSkill('skills/a/x', '# From a');
+      await writeSkill('skills/b/x', '# From b');
+      const installed = path.join(homeDir, '.claude/skills', 'x');
+      await fse.ensureDir(installed);
+      await fse.writeFile(path.join(installed, 'SKILL.md'), '# Installed by an older release');
+
+      await pull({ force: true });
+
+      expect(process.exitCode).toBe(1);
+      expect(await fse.readFile(path.join(installed, 'SKILL.md'), 'utf-8')).toBe('# Installed by an older release');
+    });
+
+    it('skips a top-level skill that shares its name with a grouped skill', async () => {
+      vi.mocked(loadLocalConfigForScope).mockResolvedValue(noRoleConfig());
+      await writeSkill('skills/x', '# Top level');
+      await writeSkill('skills/a/x', '# From a');
+
+      await pull({ force: true });
+
+      expect(process.exitCode).toBe(1);
+      const output = await errorOutput();
+      expect(output).toContain('skills/x');
+      expect(output).toContain('skills/a/x');
+      expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'x'))).toBe(false);
+    });
+
+    it('skips a tag-subscribed skill that collides with a directory skill', async () => {
+      await writeSkill('skills/hai/x', '# From hai');
+      await writeSkill('skills/pm/x', '# From pm');
+      await fse.writeFile(path.join(repoPath, 'tags.yaml'), 'skills:\n  x: [wanted]\n');
+      vi.mocked(loadLocalConfigForScope).mockResolvedValue({
+        ...noRoleConfig(),
+        primaryRole: 'hai',
+        resourceProfileVersion: 1,
+        subscribedTags: ['wanted'],
+      });
+
+      await pull({ force: true });
+
+      expect(process.exitCode).toBe(1);
+      const output = await errorOutput();
+      expect(output).toContain('Duplicate skill "x"');
+      expect(output).toContain('skills/hai/x');
+      expect(output).toContain('skills/pm/x');
+      expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'x'))).toBe(false);
+    });
   });
 
   it('cleans up stale skills after role change (full pull cycle)', async () => {

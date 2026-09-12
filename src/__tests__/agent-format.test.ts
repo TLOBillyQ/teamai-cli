@@ -67,7 +67,6 @@ function buildTeamConfig(toolPaths: TeamaiConfig['toolPaths']): TeamaiConfig {
     reviewers: [],
     sharing: {
       skills: {},
-      rules: { enforced: [] },
       docs: { localDir: '' },
       env: { injectShellProfile: true },
     },

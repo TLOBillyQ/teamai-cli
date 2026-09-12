@@ -114,7 +114,6 @@ describe('pull agents cleanup after role change', () => {
       reviewers: [],
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: '' },
         env: { injectShellProfile: true },
       },

@@ -12,11 +12,12 @@ import { injectClaudeMdSection, removeClaudeMdSection } from './utils/claudemd.j
 import { getHandler, RulesHandler, DocsHandler, EnvHandler, AgentsHandler } from './resources/index.js';
 import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
+import { findDuplicateSkillNames, reportDuplicateSkills, type DuplicateSkill } from './resources/skill-duplicates.js';
 import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import { loadTagsConfig, filterByTags } from './utils/tags.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
-import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, TagsConfig } from './types.js';
+import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig } from './types.js';
 import {
   getUserLearningsDir,
   TEAMAI_CULTURE_START,
@@ -298,8 +299,12 @@ export async function scanRoleAwareSkills(localConfig: LocalConfig, namespaces: 
     const namespaceDir = path.join(localConfig.repo.localPath, 'skills', namespace);
     const dirs = await listDirs(namespaceDir);
     for (const dir of dirs) {
+      const relativePath = `skills/${namespace}/${dir}`;
       const existing = items.get(dir);
-      if (existing) {
+      // The same namespace listed twice is the same skill, not a duplicate.
+      if (existing && existing.relativePath !== relativePath) {
+        // Role mode keeps its original wording; namespaces come from the role
+        // config, so the reported pair does not depend on listing order.
         throw new Error(`Duplicate skill "${dir}" found in active namespaces "${existing.namespace}" and "${namespace}"`);
       }
 
@@ -307,7 +312,7 @@ export async function scanRoleAwareSkills(localConfig: LocalConfig, namespaces: 
         name: dir,
         type: 'skills',
         sourcePath: path.join(namespaceDir, dir),
-        relativePath: `skills/${namespace}/${dir}`,
+        relativePath,
         namespace,
       });
     }
@@ -322,6 +327,8 @@ export interface DesiredSkills {
   items: ResourceItem[];
   /** Every skill in the team repo — the set cleanup is allowed to prune from. */
   teamItems: ResourceItem[];
+  /** Selected names with conflicting source paths; never installed. */
+  duplicates: DuplicateSkill[];
   /** How many skills the tag channel left out, for the sync line. */
   skippedByTags: number;
 }
@@ -342,25 +349,18 @@ export async function resolveDesiredSkills(
   localConfig: LocalConfig,
   roleContext: RolePullContext | null,
 ): Promise<DesiredSkills> {
-  const handler = getHandler('skills');
   const tagsConfig = await loadTagsConfig(localConfig.repo.localPath);
-  const subscribedTags = localConfig.subscribedTags;
   const excludedSkills = new Set(localConfig.excludedSkills ?? []);
-
+  const teamItems = await getHandler('skills').scanTeamForPull(teamConfig, localConfig);
   const directoryItems = roleContext
     ? await scanRoleAwareSkills(localConfig, roleContext.activeNamespaces)
-    : await handler.scanTeamForPull(teamConfig, localConfig);
-
-  const teamItems = await handler.scanTeamForPull(teamConfig, localConfig);
+    : teamItems;
 
   // Tag channel: only augment when subscriptions are actually active
-  const hasActiveTagSubscriptions = tagsConfig != null
-    && subscribedTags != null
-    && subscribedTags.length > 0;
-
+  const subscribedTags = localConfig.subscribedTags;
   let tagIncluded: ResourceItem[] = [];
   let skippedByTags = 0;
-  if (hasActiveTagSubscriptions) {
+  if (tagsConfig != null && subscribedTags != null && subscribedTags.length > 0) {
     const tagResult = filterByTags(teamItems, tagsConfig, subscribedTags, 'skills');
     const subscribedTagSet = new Set(subscribedTags);
     tagIncluded = tagResult.included.filter((item) => {
@@ -370,18 +370,17 @@ export async function resolveDesiredSkills(
     skippedByTags = tagResult.skipped.length;
   }
 
-  // Union: merge directory items with tag-matched items
-  const merged = new Map<string, ResourceItem>();
-  for (const item of directoryItems) merged.set(item.name, item);
-  for (const item of tagIncluded) {
-    if (!merged.has(item.name)) merged.set(item.name, item);
+  // Union by path: a tag match on a directory-selected skill is the same skill,
+  // but a tag match elsewhere with the same name is a collision.
+  const union = new Map<string, ResourceItem>();
+  for (const item of [...directoryItems, ...tagIncluded]) {
+    if (!union.has(item.relativePath)) union.set(item.relativePath, item);
   }
-
-  const items = excludedSkills.size > 0
-    ? [...merged.values()].filter((item) => !excludedSkills.has(item.name))
-    : [...merged.values()];
-
-  return { items, teamItems, skippedByTags };
+  const duplicates = findDuplicateSkillNames([...union.values()]);
+  const ambiguous = new Set(duplicates.map((d) => d.name));
+  const items = [...union.values()]
+    .filter((item) => !ambiguous.has(item.name) && !excludedSkills.has(item.name));
+  return { items, teamItems, skippedByTags, duplicates };
 }
 
 export interface DesiredRules {
@@ -1089,9 +1088,22 @@ async function pullForScope(
   // Step 2: Sync each resource type
   let totalSynced = 0;
   let desiredSkillNames: Set<string> | null = null;
-  let knownRepoSkillNames: Set<string> | null = null;
   // name → team-repo source dir, for the data-safety check in Step 3b cleanup.
   let knownRepoSkillSources: Map<string, string> | null = null;
+
+  // Resolve skills before installing anything: an ambiguous skill name is
+  // skipped and reported (exit code 1); everything else still syncs.
+  let skillPlan: DesiredSkills | null = null;
+  if (resourceTypes.includes('skills')) {
+    skillPlan = await resolveDesiredSkills(freshConfig, localConfig, roleContext);
+    reportDuplicateSkills(skillPlan.duplicates, `[${scopeLabel}] `);
+    desiredSkillNames = new Set(skillPlan.items.map((i) => i.name));
+    // Never pick a cleanup source for a name shared by multiple repo paths.
+    const ambiguous = new Set(findDuplicateSkillNames(skillPlan.teamItems).map((d) => d.name));
+    knownRepoSkillSources = new Map(skillPlan.teamItems
+      .filter((item) => !ambiguous.has(item.name))
+      .map((item) => [item.name, item.sourcePath]));
+  }
 
   for (const type of resourceTypes) {
     const handler = getHandler(type);
@@ -1120,13 +1132,9 @@ async function pullForScope(
     // Skills: directory (role namespace) first, then tags, union of both
     let items: ResourceItem[];
     let skippedByTags = 0;
-    if (type === 'skills') {
-      const desired = await resolveDesiredSkills(freshConfig, localConfig, roleContext);
-      items = desired.items;
-      skippedByTags = desired.skippedByTags;
-      desiredSkillNames = new Set(items.map((i) => i.name));
-      knownRepoSkillNames = new Set(desired.teamItems.map((i) => i.name));
-      knownRepoSkillSources = new Map(desired.teamItems.map((i) => [i.name, i.sourcePath]));
+    if (type === 'skills' && skillPlan) {
+      items = skillPlan.items;
+      skippedByTags = skillPlan.skippedByTags;
     } else if (type === 'agents') {
       // Throws on a stem collision; the caller's try/catch logs it and aborts
       // the scope.
@@ -1235,7 +1243,7 @@ async function pullForScope(
   }
 
   // Step 3b: Clean up local skills not in the desired union set (role + tags)
-  if (!options.dryRun && desiredSkillNames && knownRepoSkillNames) {
+  if (!options.dryRun && desiredSkillNames && knownRepoSkillSources) {
     const baseDir = resolveBaseDir(localConfig);
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
@@ -1249,7 +1257,7 @@ async function pullForScope(
       for (const dir of localDirs) {
         if (BUILTIN_SKILL_NAMES.has(dir)) continue;
         if (desiredSkillNames.has(dir)) continue;
-        if (!knownRepoSkillNames.has(dir)) continue;
+        if (!knownRepoSkillSources.has(dir)) continue;
         const skillDir = path.join(skillsDir, dir);
         // Same data-safety gate as cleanupInactiveNamespaceSkills: never delete a
         // deployed skill that differs from its team-repo source (local edits or

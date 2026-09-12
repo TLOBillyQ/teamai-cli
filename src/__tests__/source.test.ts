@@ -29,6 +29,14 @@ vi.mock('../utils/git.js', () => ({
 
 import { deriveSourceName, getAllSourceSkillNames, pullSources, sourceSyncWarnings } from '../source.js';
 import type { TeamaiConfig, LocalConfig, SourceInstallManifest } from '../types.js';
+import { DEFAULT_TOOL_PATHS } from '../types.js';
+
+// teamai.yaml toolPaths merge over the built-in table (#14), so a "codex only"
+// team repo has to set every other default tool to false explicitly.
+const CODEX_ONLY_TOOL_PATHS = {
+  ...Object.fromEntries(Object.keys(DEFAULT_TOOL_PATHS).map((tool) => [tool, false])),
+  codex: { skills: '.codex/skills' },
+};
 
 describe('source', () => {
   let tmpDir: string;
@@ -54,7 +62,7 @@ describe('source', () => {
       repo: 'https://git.woa.com/test/repo.git',
       provider: 'tgit' as const,
       reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },
       },
@@ -212,13 +220,15 @@ describe('source', () => {
 
     it('deploys a source Codex skill to its existing shared location', async () => {
       teamConfig.sources = [{ name: 'platform', repo: 'https://example.test/platform/repo.git' }];
-      teamConfig.toolPaths = { codex: { skills: '.codex/skills' } };
       const sharedSkill = path.join(homeDir, '.agents', 'skills', 'cool-skill');
       await fse.ensureDir(path.join(homeDir, '.codex'));
       await fse.ensureDir(sharedSkill);
 
       const YAML = (await import('yaml')).default;
-      await fse.writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), YAML.stringify(teamConfig));
+      await fse.writeFile(
+        path.join(localConfig.repo.localPath, 'teamai.yaml'),
+        YAML.stringify({ ...teamConfig, toolPaths: CODEX_ONLY_TOOL_PATHS }),
+      );
       const sourceRepoDir = path.join(sourcesDir, 'platform', 'repo');
       await fse.ensureDir(path.join(sourceRepoDir, 'skills', 'cool-skill'));
       await fse.writeFile(
@@ -379,9 +389,11 @@ describe('source', () => {
 
     it('removes a source skill from its recorded path when a shared Codex skill appears later', async () => {
       teamConfig.sources = [{ name: 'platform', repo: 'git@git.woa.com:platform/repo.git' }];
-      teamConfig.toolPaths = { codex: { skills: '.codex/skills' } };
       const YAML = (await import('yaml')).default;
-      await fse.writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), YAML.stringify(teamConfig));
+      await fse.writeFile(
+        path.join(localConfig.repo.localPath, 'teamai.yaml'),
+        YAML.stringify({ ...teamConfig, toolPaths: CODEX_ONLY_TOOL_PATHS }),
+      );
 
       const sourceDir = path.join(sourcesDir, 'platform');
       await fse.ensureDir(sourceDir);

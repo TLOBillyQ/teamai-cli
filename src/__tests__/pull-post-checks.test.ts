@@ -113,7 +113,7 @@ describe('checks at the end of an interactive pull', () => {
       provider: 'github',
       reviewers: [],
       sharing: {
-        skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true },
+        skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true },
       },
       toolPaths: { claude: { skills: '.claude/skills', rules: '.claude/rules' } },
     };

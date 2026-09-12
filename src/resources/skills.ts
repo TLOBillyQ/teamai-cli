@@ -11,6 +11,7 @@ import { getHermesHome } from '../hermes-home.js';
 import { loadRolesManifest, resolveRoleResourceNamespaces } from '../roles.js';
 import { assertWithinRoot } from '../utils/path-safety.js';
 import { splitFrontmatter, stringifyFrontmatter } from '../utils/frontmatter.js';
+import { findDuplicateSkillNames, reportDuplicateSkills } from './skill-duplicates.js';
 
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
@@ -345,71 +346,34 @@ export class SkillsHandler extends ResourceHandler {
    */
   async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const scopedNamespaces = await resolveSkillNamespaces(localConfig);
+
+    // Every team skill: top level plus every group (flat vs namespaced layout
+    // is detected by the presence of SKILL.md). In role mode only top-level
+    // skills and allowed namespaces are pushable targets.
+    const allTeamSkills = await this.scanTeamForPull(teamConfig, localConfig);
+    const visibleTeamSkills = scopedNamespaces.length > 0
+      ? allTeamSkills.filter((item) => !item.namespace || scopedNamespaces.includes(item.namespace))
+      : allTeamSkills;
+
+    // Groups are not part of the installed name, so a name found at more than
+    // one visible path is ambiguous. It is never attributed to any one group.
+    const ambiguousSkills = new Map(findDuplicateSkillNames(visibleTeamSkills).map((d) => [d.name, d]));
     const teamSkills = new Map<string, { dir: string; namespace?: string }>();
-    const blockedSkills = new Set<string>(); // Skills in non-allowed namespaces (role-based)
-
-    if (scopedNamespaces.length > 0) {
-      // Role-based mode: load allowed namespaces and track blocked ones.
-      // Also recognize root-level flat skills (those with SKILL.md directly inside).
-      const allSkillsDir = path.join(localConfig.repo.localPath, 'skills');
-      const topDirs = await listDirs(allSkillsDir);
-
-      // First pass: identify root-level flat skills (accessible to everyone)
-      for (const dir of topDirs) {
-        const dirPath = path.join(allSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) {
-          // Root-level flat skill — shared across all roles
-          teamSkills.set(dir, { dir: dirPath });
-        }
-      }
-
-      // Second pass: load skills from allowed namespaces
-      for (const namespace of scopedNamespaces) {
-        const teamSkillsNsDir = path.join(allSkillsDir, namespace);
-        const names = await listDirs(teamSkillsNsDir);
-        for (const name of names) {
-          if (!teamSkills.has(name)) {
-            teamSkills.set(name, { dir: path.join(teamSkillsNsDir, name), namespace });
-          }
-        }
-      }
-
-      // Third pass: scan non-allowed namespace directories for blocked skills
-      for (const dir of topDirs) {
-        const dirPath = path.join(allSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) continue; // Already handled as root-level flat skill
-        if (scopedNamespaces.includes(dir)) continue; // Already processed as allowed namespace
-        const names = await listDirs(dirPath);
-        for (const name of names) {
-          if (!teamSkills.has(name)) {
-            blockedSkills.add(name);
-          }
-        }
-      }
-    } else {
-      // Legacy mode (no roles): detect flat vs namespaced layout automatically.
-      // A directory is a namespace if it does NOT contain SKILL.md; otherwise it's a flat skill.
-      const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
-      const topDirs = await listDirs(teamSkillsDir);
-      for (const dir of topDirs) {
-        const dirPath = path.join(teamSkillsDir, dir);
-        const hasSkillMd = await pathExists(path.join(dirPath, 'SKILL.md'));
-        if (hasSkillMd) {
-          // Flat skill
-          teamSkills.set(dir, { dir: dirPath });
-        } else {
-          // Namespace directory — scan subdirectories as skills
-          const subDirs = await listDirs(dirPath);
-          for (const subDir of subDirs) {
-            if (!teamSkills.has(subDir)) {
-              teamSkills.set(subDir, { dir: path.join(dirPath, subDir), namespace: dir });
-            }
-          }
-        }
+    for (const item of visibleTeamSkills) {
+      if (!ambiguousSkills.has(item.name)) {
+        teamSkills.set(item.name, { dir: item.sourcePath, namespace: item.namespace });
       }
     }
+
+    // Skills that live only in non-allowed namespaces (role-based)
+    const blockedSkills = new Set<string>();
+    for (const item of allTeamSkills) {
+      if (!teamSkills.has(item.name) && !ambiguousSkills.has(item.name)) {
+        blockedSkills.add(item.name);
+      }
+    }
+    // Local skills whose name is ambiguous in the team repo: push refuses them.
+    const refusedSkills = new Set<string>();
 
     // Read tombstones to skip previously deleted resources
     const tombstones = await this.readTombstones(localConfig);
@@ -442,6 +406,11 @@ export class SkillsHandler extends ResourceHandler {
         if (blockedSkills.has(dir)) continue; // Skip skills in non-allowed namespaces
         if (BUILTIN_SKILL_NAMES.has(dir)) continue; // Skip CLI built-in skills
         if (sourceSkillNames.has(dir)) continue; // Skip cross-team source skills
+
+        if (ambiguousSkills.has(dir)) {
+          refusedSkills.add(dir);
+          continue;
+        }
 
         if (teamSkills.has(dir)) {
           // Skill exists in team repo — check if content differs
@@ -486,6 +455,10 @@ export class SkillsHandler extends ResourceHandler {
         namespace: ns,
       });
     }
+
+    // Push refuses a skill whose name is ambiguous in the team repo; every
+    // other candidate stays pushable.
+    reportDuplicateSkills([...ambiguousSkills.values()].filter((d) => refusedSkills.has(d.name)));
 
     return items;
   }

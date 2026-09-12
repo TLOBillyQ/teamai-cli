@@ -381,7 +381,6 @@ Gitea 不设默认 email 域，使用用户的 git 全局配置。
 
 ```yaml
 team: my-team
-scope: user
 description: TeamAI shared resources
 repo: https://github.com/yourorg/yourrepo.git
 provider: github
