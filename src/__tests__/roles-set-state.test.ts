@@ -80,7 +80,6 @@ describe('rolesSet — state invalidation', () => {
                 reviewers: [],
                 sharing: {
                     skills: {},
-                    rules: { enforced: [] },
                     docs: { localDir: '' },
                     env: { injectShellProfile: true },
                 },
@@ -152,7 +151,6 @@ describe('rolesSet — state invalidation', () => {
                 reviewers: [],
                 sharing: {
                     skills: {},
-                    rules: { enforced: [] },
                     docs: { localDir: '' },
                     env: { injectShellProfile: true },
                 },

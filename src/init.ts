@@ -216,8 +216,8 @@ export async function resolveActiveProjects(
  * - Invalid value → throw
  * - Omitted → **project** (cwd), unless cwd === home (E1: fall back to user)
  *
- * Local install location is decided only by the CLI; remote `teamai.yaml.scope`
- * is ignored (see issue #250).
+ * Local install location is decided only by the CLI; teamai.yaml carries no
+ * scope (issue #250; the legacy key was removed from the schema in #19).
  */
 export function resolveInitScope(
   rawScope: string | undefined,
@@ -924,7 +924,6 @@ export async function initSelfRepo(options: GlobalOptions & {
       repo: repoInfo.httpsUrl,
       provider: providerName,
       sharing: {
-        rules: { enforced: [] },
         docs: { localDir: './.teamai/docs' },
         env: { injectShellProfile: true },
       },
@@ -1457,8 +1456,8 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 3.5: Load team config
-  // Remote teamai.yaml.scope (if present) is ignored — local install location
-  // is decided only by --scope / default (issue #250).
+  // Local install location is decided only by --scope / default (issue #250);
+  // a legacy `scope` key in teamai.yaml is stripped on load.
   const teamConfig = await loadTeamConfig(localPath);
   const createdSkeleton = !teamConfig;
   if (!teamConfig) {
@@ -1469,7 +1468,6 @@ export async function init(options: GlobalOptions & {
       repo: repoInfo.httpsUrl,
       provider: providerName,
       sharing: {
-        rules: { enforced: [] },
         docs: { localDir: scope === 'project' ? './.teamai/docs' : '~/.teamai/docs' },
         env: { injectShellProfile: true },
       },

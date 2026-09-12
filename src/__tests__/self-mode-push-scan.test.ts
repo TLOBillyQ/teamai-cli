@@ -57,7 +57,7 @@ describe('single-repo mode: push scans .teamai knowledge dir', () => {
       repo: 'https://github.com/acme/app.git',
       provider: 'github' as const,
       reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       // Self-mode scan config: the synthetic entry pushCore adds.
       toolPaths: {
         [SELF_KEY]: { skills: '.teamai/skills', rules: '.teamai/rules' },

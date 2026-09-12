@@ -99,7 +99,7 @@ describe('doctor — agents delivered on disk', () => {
       provider: 'git',
       reviewers: [],
       sharing: {
-        skills: {}, rules: { enforced: [] }, docs: { localDir: '' },
+        skills: {}, docs: { localDir: '' },
         env: { injectShellProfile: false },
       },
       toolPaths: {

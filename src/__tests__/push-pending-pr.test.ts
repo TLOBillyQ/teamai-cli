@@ -273,7 +273,6 @@ function makeTeamConfig() {
     reviewers: [],
     sharing: {
       skills: {},
-      rules: { enforced: [] },
       docs: { localDir: '~/.teamai/docs' },
       env: { injectShellProfile: true },
     },

@@ -51,7 +51,6 @@ async function makeFixture(): Promise<Fixture> {
     reviewers: [],
     sharing: {
       skills: {},
-      rules: { enforced: [] },
       docs: { localDir: '' },
       env: { injectShellProfile: true },
     },

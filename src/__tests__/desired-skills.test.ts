@@ -59,7 +59,7 @@ describe('resolveDesiredSkills', () => {
       provider: 'github',
       reviewers: [],
       sharing: {
-        skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true },
+        skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true },
       },
       toolPaths: { claude: { skills: '.claude/skills' } },
     };
@@ -115,6 +115,28 @@ describe('resolveDesiredSkills', () => {
 
     // backend-skill carries a tag the user is not subscribed to.
     expect(skippedByTags).toBe(1);
+  });
+
+  it('rejects collisions across groups without a role instead of choosing the last copy', async () => {
+    await writeSkill('backend', 'shared-skill');
+    const { items, duplicates } = await resolveDesiredSkills(teamConfig, localConfig, null);
+    expect(items.map((item) => item.name)).not.toContain('shared-skill');
+    expect(duplicates).toEqual([{
+      name: 'shared-skill', paths: ['skills/backend/shared-skill', 'skills/common/shared-skill'],
+    }]);
+  });
+
+  it('detects a tag-selected collision with a role-selected skill, but not a repeated path', async () => {
+    localConfig.subscribedTags = ['shared'];
+    await fse.writeFile(path.join(repoPath, 'tags.yaml'), 'skills:\n  shared-skill: [shared]\n');
+    const initial = await resolveDesiredSkills(teamConfig, localConfig, rolesOver(['common']));
+    expect(initial.items.map((item) => item.name)).toEqual(['shared-skill']);
+    expect(initial.duplicates).toEqual([]);
+
+    await writeSkill('backend', 'shared-skill');
+    const collided = await resolveDesiredSkills(teamConfig, localConfig, rolesOver(['common']));
+    expect(collided.items).toEqual([]);
+    expect(collided.duplicates[0].paths).toEqual(['skills/backend/shared-skill', 'skills/common/shared-skill']);
   });
 
   it('writes nothing: doctor calls it on a machine it must not change', async () => {

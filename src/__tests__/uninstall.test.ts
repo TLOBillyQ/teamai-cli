@@ -64,7 +64,6 @@ function makeTeamConfig(overrides?: Partial<TeamaiConfig>): TeamaiConfig {
     reviewers: [],
     sharing: {
       skills: {},
-      rules: { enforced: [] },
       docs: { localDir: '~/.teamai/docs' },
       env: { injectShellProfile: true },
     },
@@ -215,7 +214,6 @@ describe('uninstall', () => {
     const teamConfig = makeTeamConfig({
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: `${teamaiHome}/docs` },
         env: { injectShellProfile: true },
       },
@@ -411,7 +409,6 @@ describe('uninstall', () => {
     const teamConfig = makeTeamConfig({
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: `${teamaiHome}/docs` },
         env: { injectShellProfile: true },
       },
@@ -465,7 +462,6 @@ describe('uninstall', () => {
       },
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: `${teamaiHome}/docs` },
         env: { injectShellProfile: true },
       },
@@ -500,7 +496,6 @@ describe('uninstall', () => {
       },
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: `${teamaiHome}/docs` },
         env: { injectShellProfile: true },
       },
@@ -1064,7 +1059,6 @@ describe('uninstall', () => {
       },
       sharing: {
         skills: {},
-        rules: { enforced: [] },
         docs: { localDir: `${path.join(homeDir, '.teamai')}/docs` },
         env: { injectShellProfile: true },
       },

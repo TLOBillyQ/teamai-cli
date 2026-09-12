@@ -4,7 +4,6 @@ import fse from 'fs-extra';
 import YAML from 'yaml';
 import {
   LocalConfigSchema,
-  TeamaiConfigSchema,
   ScopeEnum,
   resolveBaseDir,
   getTeamaiHome,
@@ -428,35 +427,6 @@ describe('loadStateForScope / saveStateForScope', () => {
     await saveStateForScope({ lastPull: '2025-06-01', lastPullRev: null, lastPush: null, pushedRules: [], pushedSkills: [], pushedEnvVars: [], pendingPushes: [], lastUpdateCheck: null, availableUpdate: null }, projCfg);
     const state = await loadStateForScope(projCfg);
     expect(state.lastPull).toBe('2025-06-01');
-  });
-});
-
-// ─── TeamaiConfigSchema scope field tests ────────────────
-
-describe('TeamaiConfigSchema with scope', () => {
-  const baseTeamConfig = {
-    team: 'my-team',
-    repo: 'https://example.com/repo.git',
-  };
-
-  it('should accept config without scope (legacy backward compatibility)', () => {
-    const result = TeamaiConfigSchema.parse(baseTeamConfig);
-    expect(result.scope).toBeUndefined();
-  });
-
-  it('should accept scope: "user"', () => {
-    const result = TeamaiConfigSchema.parse({ ...baseTeamConfig, scope: 'user' });
-    expect(result.scope).toBe('user');
-  });
-
-  it('should accept scope: "project"', () => {
-    const result = TeamaiConfigSchema.parse({ ...baseTeamConfig, scope: 'project' });
-    expect(result.scope).toBe('project');
-  });
-
-  it('should reject invalid scope values', () => {
-    expect(() => TeamaiConfigSchema.parse({ ...baseTeamConfig, scope: 'global' })).toThrow();
-    expect(() => TeamaiConfigSchema.parse({ ...baseTeamConfig, scope: 123 })).toThrow();
   });
 });
 

@@ -36,7 +36,7 @@ describe('single-repo mode: env + agents direct .teamai scan', () => {
     teamConfig = {
       team: 't', description: '', repo: 'https://github.com/acme/app.git',
       provider: 'github' as const, reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       toolPaths: { claude: { agents: '.claude/agents' } },
     };
     localConfig = {

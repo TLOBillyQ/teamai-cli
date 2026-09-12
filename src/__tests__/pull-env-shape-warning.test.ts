@@ -117,7 +117,7 @@ describe('env.yaml shape warning on a real pull', () => {
       provider: 'github',
       reviewers: [],
       sharing: {
-        skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true },
+        skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true },
       },
       toolPaths: { claude: { skills: '.claude/skills', rules: '.claude/rules' } },
     };

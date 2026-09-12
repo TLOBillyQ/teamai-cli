@@ -83,7 +83,6 @@ const teamConfig: TeamaiConfig = {
   reviewers: [],
   sharing: {
     skills: {},
-    rules: { enforced: [] },
     docs: { localDir: '' },
     env: { injectShellProfile: false },
   },

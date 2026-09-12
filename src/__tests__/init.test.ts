@@ -552,7 +552,6 @@ describe('init', () => {
           reviewers: [],
           sharing: {
             skills: {},
-            rules: { enforced: [] },
             docs: { localDir: '~/.teamai/docs' },
             env: { injectShellProfile: true },
           },
@@ -565,7 +564,6 @@ describe('init', () => {
           reviewers: [],
           sharing: {
             skills: {},
-            rules: { enforced: [] },
             docs: { localDir: '~/.teamai/docs' },
             env: { injectShellProfile: true },
           },
@@ -596,7 +594,6 @@ describe('init', () => {
         reviewers: [],
         sharing: {
           skills: {},
-          rules: { enforced: [] },
           docs: { localDir: '~/.teamai/docs' },
           env: { injectShellProfile: true },
         },
@@ -713,7 +710,7 @@ describe('init', () => {
         repo: REMOTE,
         provider: 'gitea',
         reviewers: [],
-        sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: './.teamai/docs' }, env: { injectShellProfile: true } },
+        sharing: { skills: {}, docs: { localDir: './.teamai/docs' }, env: { injectShellProfile: true } },
         toolPaths: {},
       } as never);
     });
@@ -781,7 +778,6 @@ describe('init', () => {
         reviewers: [],
         sharing: {
           skills: {},
-          rules: { enforced: [] },
           docs: { localDir: '~/.teamai/docs' },
           env: { injectShellProfile: true },
         },
@@ -822,7 +818,6 @@ describe('init', () => {
         reviewers: [],
         sharing: {
           skills: {},
-          rules: { enforced: [] },
           docs: { localDir: '~/.teamai/docs' },
           env: { injectShellProfile: true },
         },
@@ -855,6 +850,34 @@ describe('init', () => {
       expect(mockGit.commit).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(1);
       expect(mockExit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('default teamai.yaml', () => {
+    it('does not write the removed sharing.rules.enforced key', async () => {
+      let cloneDone = false;
+      pathExistsFn = (p: string) => {
+        if (p === localPath) return cloneDone;
+        return false;
+      };
+      mockGfRepoClone.mockImplementation(() => {
+        cloneDone = true;
+      });
+
+      const { loadTeamConfig } = await import('../config.js');
+      vi.mocked(loadTeamConfig).mockResolvedValue(null);
+      const { writeFile } = await import('../utils/fs.js');
+
+      questionAnswers = ['n', '1'];
+
+      await init({ repo: 'https://git.woa.com/HyperAI/teamai-test.git', scope: 'user' });
+
+      const teamaiYamlWrite = vi.mocked(writeFile).mock.calls
+        .find(([p]) => p === path.join(localPath, 'teamai.yaml'));
+      expect(teamaiYamlWrite).toBeDefined();
+      const written = JSON.parse(String(teamaiYamlWrite?.[1]));
+      expect(written.sharing.docs).toEqual({ localDir: '~/.teamai/docs' });
+      expect(written.sharing).not.toHaveProperty('rules');
     });
   });
 
@@ -965,7 +988,7 @@ describe('init', () => {
         provider: 'tgit',
         scope: 'user',
         reviewers: [],
-        sharing: { rules: { enforced: [] }, docs: {}, env: { injectShellProfile: true } },
+        sharing: { docs: {}, env: { injectShellProfile: true } },
         toolPaths: {},
       } as never);
 

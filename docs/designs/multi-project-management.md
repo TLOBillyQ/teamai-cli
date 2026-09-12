@@ -120,8 +120,12 @@ Concretely:
   so "project wins" is already a hard invariant here, with nothing to override.
 - **skills / knowledge** — the only place the two dimensions could "cross" is a
   **same-named** resource in a role namespace and a project namespace. That case
-  is already a hard error today (`src/pull.ts:204` `Duplicate skill ... found in
-  active namespaces`), resolved by the **admin** disambiguating names in the
+  is already a hard error today (`scanRoleAwareSkills()` in `src/pull.ts`:
+  `Duplicate skill "<name>" found in active namespaces "<a>" and "<b>"`; the same
+  guard, `findDuplicateSkillNames()` in `src/resources/skill-duplicates.ts`,
+  applies with no role, to the tag channel, and to push, listing paths:
+  `Duplicate skill "<name>" found in "<path>" and "<path>"`), resolved by the
+  **admin** disambiguating names in the
   manifest — deliberately **not** by a runtime priority rule. A well-formed
   manifest keeps role and project namespaces non-overlapping, so the crossing is
   eliminated at the source rather than arbitrated at pull time.
