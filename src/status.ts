@@ -448,7 +448,12 @@ async function printLocalAgentsSection(
 
   const installed = agents.filter((a) => a.installed);
   if (installed.length === 0) {
-    console.log('  (no installed agents detected)');
+    // Detection is directory-based, so "none" usually means the tool dir was
+    // never created — say how to fix it instead of leaving a dead end.
+    console.log('  (no installed agents detected — no tool directory exists yet)');
+    const candidates = agents.slice(0, 4).map((a) => a.id).join(', ');
+    console.log(`  Run \`teamai init --agent <id>\` to enable one${candidates ? ` (e.g. ${candidates})` : ''},`);
+    console.log('  then `teamai pull` to install skills into it.');
     return;
   }
 

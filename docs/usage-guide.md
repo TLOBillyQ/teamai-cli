@@ -100,7 +100,7 @@ teamai --version
 
 > Only one admin needs to do this — other members can skip to [Member Onboarding](#member-onboarding).
 
-Create an empty repository on GitHub, GitLab (gitlab.com or a self-hosted instance), GitCode (gitcode.com), CNB (cnb.cool), TGit, or any private/self-hosted Git service (suggested naming: `TeamAi-<team-name>`). For providers that support repository creation, you can also run `teamai init` and create a missing repo when prompted.
+Create an empty repository on GitHub, GitLab (gitlab.com or a self-hosted instance), GitCode (gitcode.com), CNB (cnb.cool), TGit, Gitea (self-hosted — set `GITEA_URL` and `GITEA_TOKEN` for the first `teamai init`, so the generated `teamai.yaml` records `provider: gitea`), or any private/self-hosted Git service (suggested naming: `TeamAi-<team-name>`). For providers that support repository creation, you can also run `teamai init` and create a missing repo when prompted.
 
 > **CNB exception:** the `cnb login` token can create neither an organization (`group-manage:rw`) nor a repo (`group-resource:rw`), so `init` prints a web link to create them instead — `https://cnb.cool/new/groups` for a missing org, `https://cnb.cool/new/repos` for a repo — then you re-run. Use a `CNB_TOKEN` access token carrying those scopes to let the CLI create them directly.
 
@@ -165,7 +165,12 @@ project roots (`.claude/`, `.cursor/`, `.codebuddy/`, …) are still created ins
 workspace on **SessionStart** for the tool that just opened. For example, opening
 Claude Code creates `.claude/`, then pull writes into it. A bare `teamai pull` still
 skips tools whose project root does not exist, so it never invents agent directories
-for tools you have not opened in this project.
+for tools you have not opened in this project — the one exception is a tool you
+enabled explicitly (`teamai init --agent <id>`, or the picker in `teamai init .`),
+whose directory pull creates so its skills actually land. Skipped tools are named in
+the pull output — on one summary line when at least one target did install, and one
+line per target (with the exact missing path) when nothing installed or when you pass
+`--verbose`, e.g. `kimi: skipped - <project>/.kimi-code not found`.
 
 > **Upgrading from an older teamai?** The first `teamai init` / `pull` / `push` /
 > `contribute` (or `import --from-mr`) after upgrading automatically migrates an existing `<repo>/.teamai/` into the partition
@@ -501,7 +506,7 @@ knowledge on main is left exactly in place).
 
 **Admin checklist after `teamai init .`:**
 
-1. `teamai init .` already commits `.teamai/` (skills, rules, docs, an empty `learnings/`, `teamai.yaml`, `.gitignore`) plus each selected tool's settings (e.g. `.claude/settings.json`, `.codex/hooks.json`) to the current branch for you. Contributions do not go there: `teamai contribute` pushes them to the `teamai-learnings` branch.
+1. `teamai init .` already commits `.teamai/` (skills, rules, docs, an empty `learnings/`, `teamai.yaml`, `.gitignore`) plus each selected tool's settings (e.g. `.claude/settings.json`, `.codex/hooks.json`) to the current branch for you. Contributions do not go there: `teamai contribute` pushes them to the `teamai-learnings` branch. If no Git identity is configured, init skips that commit and says so; set `user.name` / `user.email`, then commit those paths yourself.
 2. Push main so teammates can clone.
 3. Add resources later with `teamai push` — it opens a PR against your repo (via an isolated worktree) rather than committing to your working tree. In single-repo mode you can author them either in an AI tool dir (e.g. `~/.claude/skills/`) **or** by dropping them straight into `.teamai/` in your repo:
    - `.teamai/skills/` — team skills
@@ -570,6 +575,15 @@ teamai init https://gitlab.example.com/yourgroup/yourrepo --provider git
 - `pull` works as usual. `push` pushes the branch but cannot open a PR/MR, so open it on the Git host yourself; the command exits non-zero because that step did not run.
 - Re-running `teamai init` without `--provider` returns to auto-detection.
 
+**Gitea team repos:**
+
+```bash
+export GITEA_TOKEN=<your-gitea-token>   # Gitea → Settings → Applications → Generate Token
+teamai init http://gitea.example.com:3000/yourorg/yourrepo
+```
+
+When the team repo's `teamai.yaml` declares `provider: gitea`, `teamai init` (and `teamai init .` in single-repo mode) authenticates with Gitea and registers you under your Gitea login. The Gitea instance comes from the scheme, host and port of the repo URL, so `GITEA_URL` is optional: it takes precedence when set, and is required only for an SSH repo URL. Without a working token, init exits with an error and writes no member file or local config, instead of registering you under your git `user.name`.
+
 **HTTP mode (read-only consumer):**
 
 For users or agents that don't need git access and only consume skills/rules:
@@ -588,6 +602,7 @@ teamai init --http https://your-team-host/api --token <api-key>
 ```bash
 teamai status                       # View status
 teamai members                      # View team members
+teamai members register             # Register yourself (idempotent; retry a failed init registration)
 teamai list                         # All resource types (skills|rules|docs|env|agents|hooks|mcp) + local skills
 teamai list mcp                     # Only team MCP servers
 teamai list --source repo           # Team repo only
@@ -2487,7 +2502,7 @@ Yes, but project scope remains isolated by default. When the current working dir
 
 **Q: `teamai init` says it's already initialized?**
 
-In interactive mode, you'll be asked whether to overwrite — type `y` to confirm. You can also use `--force` to skip the confirmation:
+In interactive mode, you'll be asked whether to overwrite — type `y` to confirm. If all you need is to (re)register yourself as a member, run `teamai members register` instead of re-running init. You can also use `--force` to skip the confirmation:
 
 ```bash
 teamai init --repo https://github.com/yourorg/yourrepo --force
@@ -2496,6 +2511,34 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 **Q: After `teamai init` in a project, there is no `.claude/` (or `.cursor/`, `.codebuddy/`) directory?**
 
 That is expected for a built-in tool: `init` does not know which agent you will open. Open Claude Code / Cursor / CodeBuddy in the project: the SessionStart hook creates that tool's project root and then pulls. A bare `teamai pull` will not create missing agent roots. The exception is a custom agent defined only in `teamai.yaml`'s `toolPaths` (not one of the built-in tools) — `init --agent <id>` creates that agent's root itself, since nothing else ever would. This only works for git-backed init (default or `--self`): an HTTP init (`--http`) never clones a local `teamai.yaml`, so it has no custom paths to seed from and only ever creates roots for built-in tools that are already installed.
+
+**Q: `pull` says "Synced N skills" but nothing was installed?**
+
+The tool directory does not exist, so every target was skipped. Pull names each one:
+
+```
+[project] kimi: skipped - D:\work\myrepo\.kimi-code not found
+[project] No AI tool directories found under D:\work\myrepo - nothing was installed.
+```
+
+Fix it either by opening the tool once (it creates its own directory, then SessionStart pulls), or by enabling it explicitly - `teamai init --agent kimi` records the tool in `enabledAgents` and pull creates its directory from then on.
+
+**Q: `teamai init` reported that member registration was not pushed?**
+
+The config is written and usable, but you are not listed in `teamai members`. Init prints the reason as an error and exits non-zero, so a setup script can detect it.
+
+If the reason is `Git identity is not configured`, init checked before committing (the same check `teamai members register` runs), so your member file was neither written nor pushed. Set the identity first:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+Otherwise it is usually no network or no write access to the team repo. Fix the cause, then retry just the registration - no re-init needed:
+
+```bash
+teamai members register
+```
 
 **Q: Hooks aren't firing automatically?**
 

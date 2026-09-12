@@ -171,6 +171,57 @@ export async function configureGitUser(
 }
 
 /**
+ * Read the git identity that would author a commit in this repo (local config
+ * first, then the global/system fallback simple-git already resolves).
+ *
+ * A missing identity is the one push failure the user must fix themselves —
+ * git rejects the commit with "Author identity unknown" — so callers check it
+ * up front and print a fix instead of a raw git error.
+ */
+export async function getGitIdentity(
+  repoPath: string,
+): Promise<{ name: string | null; email: string | null }> {
+  const git = createGit(repoPath);
+  const [name, email] = await Promise.all([
+    git.getConfig('user.name'),
+    git.getConfig('user.email'),
+  ]);
+  return { name: name.value, email: email.value };
+}
+
+/**
+ * Stage `files`, commit them when anything is staged, and push the current
+ * branch — including commits an earlier failed push left behind.
+ *
+ * Unlike pushRepoDirectly (which returns early when nothing is newly staged,
+ * leaving a committed-but-unpushed change stranded), this always pushes, which
+ * is what a retry command needs. Throws on push failure so the caller can show
+ * the reason.
+ *
+ * @returns True once origin/<branch> actually contains the commit — the branch
+ *   is no longer ahead. False means the push reported success but the remote did
+ *   not move (e.g. a server-side hook rejected it silently).
+ */
+export async function commitAndPushFiles(
+  repoPath: string,
+  message: string,
+  files: string[],
+): Promise<boolean> {
+  const git = createGit(repoPath);
+  await git.add(files);
+  const status = await git.status();
+  if (status.staged.length > 0) {
+    await git.commit(message);
+  }
+
+  const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+  await git.push(['origin', branch]);
+  await git.fetch(['origin', branch]);
+  const ahead = (await git.raw(['rev-list', '--count', `origin/${branch}..HEAD`])).trim();
+  return ahead === '0' || ahead === '';
+}
+
+/**
  * Get the current HEAD commit hash (short form) of a repo.
  */
 export async function getHeadRev(localPath: string): Promise<string> {
@@ -500,19 +551,9 @@ export async function pushLearningToOrigin(
   relPath: string,
   message: string,
 ): Promise<boolean> {
-  const git = createGit(repoPath);
   // relPath is relative to learnings/ and may include a namespace subdirectory
   // (e.g. `alpha-notes/foo.md`); normalize to forward slashes for git.
-  await git.add([`learnings/${relPath.split(path.sep).join('/')}`]);
-  const status = await git.status();
-  if (status.staged.length > 0) {
-    await git.commit(message);
-  }
-  const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-  await git.push(['origin', branch]);
-  await git.fetch(['origin', branch]);
-  const ahead = (await git.raw(['rev-list', '--count', `origin/${branch}..HEAD`])).trim();
-  return ahead === '0' || ahead === '';
+  return commitAndPushFiles(repoPath, message, [`learnings/${relPath.split(path.sep).join('/')}`]);
 }
 
 /**

@@ -77,6 +77,7 @@ Generated: do not edit by hand. Regenerate with
 
 - `teamai members` — Manage team members
   - `teamai members list` — List team members
+  - `teamai members register` — Register yourself as a team member (idempotent; retries a failed init registration)
 
 ## remove
 

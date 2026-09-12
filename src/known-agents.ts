@@ -147,13 +147,16 @@ export interface ResolvedAgent extends KnownAgent {
  * skillsPath (admin can override the default location).
  */
 /**
- * Seed the tool skills-directory root for the agents this scope should sync
- * to, so that first-run injection actually lands.
+ * Seed the tool skills-directory root for the agents this scope should sync to,
+ * so that injection actually lands.
  *
  * `teamai pull` only injects into AI tools whose root dir already exists
- * (isToolInstalled) — normally the user "opts in" by having e.g. ~/.claude
- * before ever running teamai. Two cases break that assumption, and both call
- * this to seed the dir instead of relying on it already being there:
+ * (isToolInstalled) — the implicit "opt in" is having e.g. ~/.claude. That gate
+ * silently produces a zero-install pull for a tool that has no directory yet:
+ * single-repo mode's "clone → auto-inject" promise (a teammate's fresh clone has
+ * no <repo>/.claude), and any agent the user named explicitly (`--agent kimi`)
+ * whose tool never creates its own dir. Listing an agent in `enabledAgents` IS
+ * the explicit opt-in, so its dir is created here rather than waited on.
  *
  * - Single-repo mode's whole promise is "clone → auto-inject": a teammate's
  *   fresh clone has no <repo>/.claude yet, so nothing would ever inject.
@@ -178,7 +181,7 @@ export interface ResolvedAgent extends KnownAgent {
  *
  * Returns the list of agent ids whose dirs were ensured.
  */
-export async function seedSelfModeToolDirs(
+export async function ensureEnabledAgentDirs(
   localConfig: LocalConfig,
   teamConfig: TeamaiConfig,
 ): Promise<string[]> {

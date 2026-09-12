@@ -10,7 +10,7 @@ vi.mock('../utils/logger.js', () => ({
 import {
   normalizeAgentList,
   detectHomeInstalledAgents,
-  seedSelfModeToolDirs,
+  ensureEnabledAgentDirs,
   SELF_MODE_AGENT_CHOICES,
 } from '../known-agents.js';
 import { resolveSelfModeSelection } from '../init.js';
@@ -90,7 +90,7 @@ describe('detectHomeInstalledAgents', () => {
   });
 });
 
-describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
+describe('ensureEnabledAgentDirs (no hardcoded claude default)', () => {
   let tmp: string;
   let repoRoot: string;
   let teamConfig: TeamaiConfig;
@@ -126,26 +126,26 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
   });
 
   it('seeds nothing when enabledAgents is empty (no default claude)', async () => {
-    const seeded = await seedSelfModeToolDirs(makeConfig([]), teamConfig);
+    const seeded = await ensureEnabledAgentDirs(makeConfig([]), teamConfig);
     expect(seeded).toEqual([]);
     expect(await fse.pathExists(path.join(repoRoot, '.claude'))).toBe(false);
   });
 
   it('seeds nothing when enabledAgents is undefined (no default claude)', async () => {
-    const seeded = await seedSelfModeToolDirs(makeConfig(undefined), teamConfig);
+    const seeded = await ensureEnabledAgentDirs(makeConfig(undefined), teamConfig);
     expect(seeded).toEqual([]);
     expect(await fse.pathExists(path.join(repoRoot, '.claude'))).toBe(false);
   });
 
   it('seeds exactly the enabled agents, and no others', async () => {
-    const seeded = await seedSelfModeToolDirs(makeConfig(['codex']), teamConfig);
+    const seeded = await ensureEnabledAgentDirs(makeConfig(['codex']), teamConfig);
     expect(seeded).toEqual(['codex']);
     expect(await fse.pathExists(path.join(repoRoot, '.codex/skills'))).toBe(true);
     expect(await fse.pathExists(path.join(repoRoot, '.claude'))).toBe(false);
   });
 
   it('seeds multiple selected agents', async () => {
-    const seeded = await seedSelfModeToolDirs(makeConfig(['claude', 'cursor']), teamConfig);
+    const seeded = await ensureEnabledAgentDirs(makeConfig(['claude', 'cursor']), teamConfig);
     expect(new Set(seeded)).toEqual(new Set(['claude', 'cursor']));
     expect(await fse.pathExists(path.join(repoRoot, '.claude/skills'))).toBe(true);
     expect(await fse.pathExists(path.join(repoRoot, '.cursor/skills'))).toBe(true);
@@ -154,7 +154,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
   it('never seeds an explicitly disabled agent', async () => {
     const config = makeConfig(['claude', 'codex']);
     config.disabledAgents = ['codex'];
-    const seeded = await seedSelfModeToolDirs(config, teamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, teamConfig);
     expect(seeded).toEqual(['claude']);
     expect(await fse.pathExists(path.join(repoRoot, '.codex'))).toBe(false);
   });
@@ -176,7 +176,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, 'a', 'skills'))).toBe(true);
@@ -198,7 +198,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, teamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, teamConfig);
 
     expect(seeded).toEqual([]);
     expect(await fse.pathExists(path.join(repoRoot, '.claude'))).toBe(false);
@@ -223,7 +223,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, '.config/aa/skills'))).toBe(true);
@@ -246,7 +246,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, 'a', 'rules'))).toBe(true);
@@ -272,7 +272,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, 'a'))).toBe(true);
@@ -295,7 +295,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, 'a'))).toBe(true);
@@ -318,7 +318,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, 'a', 'skills'))).toBe(true);
@@ -341,7 +341,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    await seedSelfModeToolDirs(config, customTeamConfig);
+    await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(await fse.pathExists(path.join(repoRoot, 'AGENTS.md'))).toBe(false);
 
@@ -369,7 +369,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', home);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, '.aa', 'skills'))).toBe(true);
@@ -397,7 +397,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', repoRoot);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     const settingsPath = path.join(repoRoot, 'settings.json');
@@ -428,7 +428,7 @@ describe('seedSelfModeToolDirs (no hardcoded claude default)', () => {
     };
     vi.stubEnv('HOME', home);
 
-    const seeded = await seedSelfModeToolDirs(config, customTeamConfig);
+    const seeded = await ensureEnabledAgentDirs(config, customTeamConfig);
 
     expect(seeded).toContain('AA');
     expect(await fse.pathExists(path.join(repoRoot, '.aa', 'skills'))).toBe(true);

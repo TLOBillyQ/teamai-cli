@@ -1,11 +1,52 @@
 import YAML from 'yaml';
 import path from 'node:path';
 import { requireInit, detectProjectConfig } from './config.js';
-import { readFileSafe, listFiles } from './utils/fs.js';
-import { pullRepo } from './utils/git.js';
+import { readFileSafe, listFiles, ensureDir, pathExists, writeFile } from './utils/fs.js';
+import { pullRepo, getGitIdentity } from './utils/git.js';
 import { log } from './utils/logger.js';
 import { MemberConfigSchema } from './types.js';
 import type { GlobalOptions, LocalConfig, MemberConfig } from './types.js';
+
+/** Command the user runs to retry a registration that did not reach the remote. */
+export const RETRY_HINT = 'Run `teamai members register` to retry once it is fixed.';
+
+/**
+ * Why a registration commit cannot be made: git has no author identity.
+ * `teamai init` and `teamai members register` both report exactly this line.
+ */
+export const MISSING_GIT_IDENTITY = 'Git identity is not configured, so the registration commit cannot be authored.';
+
+/** Print the commands that fix MISSING_GIT_IDENTITY. */
+export function logGitIdentityFix(): void {
+  log.info('  git config --global user.name "Your Name"');
+  log.info('  git config --global user.email "you@example.com"');
+}
+
+/**
+ * Preflight for a registration commit. Git refuses to commit without an author
+ * ("Author identity unknown"), so callers check before writing anything and
+ * print a fix instead of a raw git error.
+ *
+ * @param repoPath - Repo the commit would be made in (local config applies).
+ * @returns MISSING_GIT_IDENTITY when user.name or user.email is unset, else null.
+ */
+export async function checkGitIdentity(repoPath: string): Promise<string | null> {
+  const identity = await getGitIdentity(repoPath);
+  return identity.name && identity.email ? null : MISSING_GIT_IDENTITY;
+}
+
+/**
+ * Render the `members/<username>.yaml` payload. Every registration path (init,
+ * clone bootstrap, and the retry command) writes the same shape, so they share
+ * this one definition.
+ */
+export function buildMemberYaml(username: string): string {
+  return YAML.stringify({
+    username,
+    displayName: username,
+    registeredAt: new Date().toISOString(),
+  });
+}
 
 /**
  * Read a specific member's config from the repo.
@@ -156,4 +197,74 @@ export async function listMembers(options: GlobalOptions): Promise<void> {
     }
   }
   console.log('');
+}
+
+/**
+ * Register the current user as a team member, idempotently.
+ *
+ * `teamai init` registers as a side effect, but its push is best-effort: a
+ * machine without a git identity (or offline) ends up initialized yet unlisted,
+ * and re-running init aborts on the existing config. This is the retry entry
+ * point — it only touches `members/<username>.yaml`, so it is safe to run any
+ * number of times, and it re-pushes a file an earlier attempt left local-only.
+ */
+export async function registerMember(): Promise<void> {
+  const projectConfig = await detectProjectConfig();
+  const localConfig: LocalConfig = projectConfig ?? (await requireInit()).localConfig;
+  const { username } = localConfig;
+
+  // HTTP team repos are read-only consumers: there is no clone to commit into.
+  if (localConfig.repo.kind === 'http') {
+    log.error('This install uses a read-only HTTP team repo, which has no member roster to push to.');
+    log.info('Ask a team admin to add you, or re-init against the git repo to register yourself.');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Members live on the teamai-reports orphan branch (see listMembers).
+  const { ensureReportsWorktree, refreshReportsWorktree, commitAndPushReports } = await import('./utils/reports-branch.js');
+  await refreshReportsWorktree(localConfig);
+  const repoPath = await ensureReportsWorktree(localConfig);
+
+  // Preflight (shared with init): say so before writing anything.
+  const identityError = await checkGitIdentity(repoPath);
+  if (identityError) {
+    log.error(identityError);
+    logGitIdentityFix();
+    log.info(RETRY_HINT);
+    process.exitCode = 1;
+    return;
+  }
+
+  const memberPath = path.join(repoPath, 'members', `${username}.yaml`);
+  const alreadyLocal = await pathExists(memberPath);
+  if (!alreadyLocal) {
+    await ensureDir(path.dirname(memberPath));
+    await writeFile(memberPath, buildMemberYaml(username));
+  }
+
+  const message = `[teamai] Register member: ${username}`;
+  try {
+    const pushed = await commitAndPushReports(localConfig, message, ['members/']);
+    // commitAndPushReports also returns false when there was nothing to commit,
+    // which for an already-registered member is the success case.
+    if (!pushed && !alreadyLocal) {
+      log.error(`Member registration could not be pushed for ${username}.`);
+      log.info(`Check connectivity and write access to the team repo. ${RETRY_HINT}`);
+      process.exitCode = 1;
+      return;
+    }
+  } catch (e) {
+    log.error(`Member registration failed to push: ${(e as Error).message}`);
+    log.info(RETRY_HINT);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (alreadyLocal) {
+    log.success(`Member ${username} is registered.`);
+  } else {
+    log.success(`Registered as team member: ${username}`);
+  }
+  log.info('Run `teamai members` to see the full roster.');
 }
