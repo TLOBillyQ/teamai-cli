@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'fs-extra';
 
 import { getGitHubToken } from './providers/github/gh-cli.js';
+import { getGiteaToken, giteaAuthHeaderValue } from './providers/gitea/gitea-api.js';
 import { getGitLabToken } from './providers/gitlab/gitlab-api.js';
 import { getGitCodeToken } from './providers/gitcode/gitcode-api.js';
 import { tgitGitCloneUrl } from './providers/tgit/rest-auth.js';
@@ -196,6 +197,20 @@ function resolveCloneAuth(
             cloneMethod = 'https-anonymous';
             log.debug(`shallowClone: 无 GITLAB_TOKEN，尝试匿名 HTTPS 克隆`);
         }
+    } else if (provider === 'gitea') {
+        // Gitea: token 走 HTTP Basic（token 作用户名，密码留空；GITEA_USER 存在时
+        // 反过来）。用 http.extraHeader 注入，token 不进 URL。不强制 http→https：
+        // 自托管 Gitea 常见就是内网 http。
+        const token = getGiteaToken();
+        cloneUrl = url;
+        if (token) {
+            extraAuthHeader = giteaAuthHeaderValue(token);
+            cloneMethod = 'https-token';
+            log.debug(`shallowClone: 使用 HTTPS+token 克隆 gitea 仓库`);
+        } else {
+            cloneMethod = 'https-anonymous';
+            log.debug(`shallowClone: 无 GITEA_TOKEN，尝试匿名 HTTPS 克隆`);
+        }
     } else if (provider === 'gitcode') {
         // GitCode: PAT 走 HTTP Basic（用户名固定 oauth2），用 http.extraHeader 注入，
         // token 不进 URL、不落 .git/config。shallowFetch 会用同样的 header 复用认证
@@ -213,7 +228,8 @@ function resolveCloneAuth(
         }
     } else {
         // 其他 provider 依赖 Git 自身的 credential helper / ~/.netrc。
-        cloneUrl = url.replace(/^http:\/\//, 'https://');
+        // 不强制 http→https：自建/内网 Git 服务常见就是 http。
+        cloneUrl = url;
         cloneMethod = 'https-anonymous';
         log.debug(`shallowClone: 使用 HTTPS (Git credential helper / ~/.netrc) 克隆 ${provider} 仓库`);
     }
@@ -319,6 +335,10 @@ function fetchAuthHeader(provider?: string): string | null {
         const token = getGitCodeToken();
         return token ? buildAuthHeader(token, 'oauth2') : null;
     }
+    if (provider === 'gitea') {
+        const token = getGiteaToken();
+        return token ? giteaAuthHeaderValue(token) : null;
+    }
     return null;
 }
 
@@ -326,7 +346,7 @@ function fetchAuthHeader(provider?: string): string | null {
  * 在已有 clone 目录上执行 git fetch 并 reset 到最新 HEAD（用于 P5.3 增量；P5.1 暂不调用）。
  *
  * @param localPath  本地 clone 目录
- * @param opts       选项。传入 `provider` 时，token 类 provider（github/gitlab/gitcode）
+ * @param opts       选项。传入 `provider` 时，token 类 provider（github/gitlab/gitcode/gitea）
  *                   会用 `http.extraHeader` 复用认证——私有仓无需 credential helper 即可 fetch，
  *                   且 token 不进 URL / .git/config。
  */

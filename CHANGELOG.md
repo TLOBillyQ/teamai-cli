@@ -112,6 +112,7 @@ All notable changes to this project will be documented in this file. See [standa
 - `teamai status` counts rule files in subdirectories recursively ([#437](https://github.com/Tencent/teamai-cli/pull/437)).
 - Codex Stop-phase contribution hints are deferred to the next prompt, so the host no longer rejects `additionalContext` ([#441](https://github.com/Tencent/teamai-cli/pull/441)).
 - Agent version detection launches the agent CLI through cross-spawn, so on Windows an npm-installed agent CLI such as `codebuddy`, `claude` or `openclaw` (a `.cmd` shim) reports its version instead of an empty `agent_version`.
+- `teamai init` reports a failed member registration as an error, matching its exit code 1, and runs the same Git identity preflight as `teamai members register` before registering, so a missing identity gets the explicit fix instead of git's raw "Author identity unknown" (for #17).
 
 ### 📝 Documentation
 

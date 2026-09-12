@@ -4,6 +4,8 @@ import readline from 'node:readline/promises';
 
 import matter from 'gray-matter';
 
+import { fetchGiteaPR } from './providers/gitea/mr-fetch.js';
+import { giteaHost } from './providers/gitea/repo-url.js';
 import { fetchGitHubPR } from './providers/github/mr-fetch.js';
 import { fetchGitLabMR } from './providers/gitlab/mr-fetch.js';
 import { fetchTGitMR } from './providers/tgit/mr-fetch.js';
@@ -35,7 +37,28 @@ async function fetchMR(url: string): Promise<MRData> {
   if (/\/-\/merge_requests\/\d+/.test(url)) {
     return fetchGitLabMR(url);
   }
-  throw new Error(`Unsupported MR URL: ${url}. Only GitHub, TGit and GitLab are supported`);
+  // Gitea (self-hosted only): `/pulls/<n>` is plural, unlike GitHub's `/pull/`.
+  // That route alone is not conclusive on an arbitrary host, so also require the
+  // host to be the configured Gitea instance — otherwise fall through rather
+  // than send a token somewhere unexpected.
+  if (/\/pulls\/\d+/.test(url) && isConfiguredGiteaUrl(url)) {
+    return fetchGiteaPR(url);
+  }
+  throw new Error(
+    `Unsupported MR URL: ${url}. Only GitHub, TGit, GitLab and Gitea are supported`,
+  );
+}
+
+/** True when `url`'s host is the configured Gitea instance. */
+function isConfiguredGiteaUrl(url: string): boolean {
+  const configured = giteaHost();
+  if (!configured) return false;
+  try {
+    const host = new URL(url).host.toLowerCase();
+    return host === configured.trim().toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -159,6 +182,10 @@ function extractRepoUrlFromMrUrl(mrUrl: string): string {
   // GitLab: https://<host>/group[/subgroup]/repo/-/merge_requests/123
   const gitlabMatch = mrUrl.match(/^(https?:\/\/.+?\/.+\/[^/]+)\/-\/merge_requests\//);
   if (gitlabMatch) return `${gitlabMatch[1]}.git`;
+  // Gitea: https://<host>/owner/repo/pulls/123 — host-gated like fetchMR, since
+  // `/pulls/` on an unknown host is not necessarily Gitea.
+  const giteaMatch = mrUrl.match(/^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\/pulls\/\d+/);
+  if (giteaMatch && isConfiguredGiteaUrl(mrUrl)) return `${giteaMatch[1]}.git`;
   // Cannot reliably extract; return empty string so caller skips incremental update
   return '';
 }
