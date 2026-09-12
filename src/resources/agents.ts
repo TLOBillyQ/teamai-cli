@@ -22,6 +22,7 @@ import {
   reverseFromJoycode,
   reverseFromKiro,
   reverseFromOpencode,
+  reverseFromKimi,
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
   AGENT_FILE_EXTENSIONS,
@@ -753,5 +754,7 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromClaude(filePath, content);
     case 'opencode':
       return reverseFromOpencode(filePath, content);
+    case 'kimi':
+      return reverseFromKimi(filePath, content);
   }
 }

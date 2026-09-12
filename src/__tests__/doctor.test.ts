@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import path from 'node:path';
 
 // ── Mocks ────────────────────────────────────────────────
@@ -697,5 +697,92 @@ describe('buildChecks — a tool enabled but not installed', () => {
         expect(codex).toMatchObject({ name: 'codex is installed', ok: false });
         expect(codex?.fix).toBeTruthy();
         expect(allPassed).toBe(false);
+    });
+});
+
+describe('doctor — kimi hook check (issue #12)', () => {
+    const kimiHome = '/tmp/teamai-doctor-kimi-home';
+    const kimiTeamConfig = {
+        ...mockTeamConfig,
+        toolPaths: { ...mockTeamConfig.toolPaths, kimi: { skills: '.kimi-code/skills' } },
+    };
+    const KIMI_CONFIG_WITH_HOOKS = [
+        '[[hooks]]',
+        'event = "SessionStart"',
+        'command = "teamai hook-dispatch session-start --tool kimi"',
+        'timeout = 30',
+        '',
+    ].join('\n');
+
+    // Keep the global fixture's manifest guard: the delivery checks resolve
+    // the projects manifest through readFileSafe, and serving the hooks JSON
+    // for that read fails its parse (version is required).
+    function kimiFiles(configToml: string | null) {
+        return async (p: string) => (
+            p.endsWith('config.toml') ? configToml
+                : p.includes(`${path.sep}manifest${path.sep}`) ? null
+                    : buildFullHooksContent()
+        );
+    }
+
+    function lines(): string[] {
+        return consoleSpy.mock.calls.map((c) => String(c[0]));
+    }
+    function kimiLine(): string | undefined {
+        return lines().find((m) => m.includes('hooks in kimi'));
+    }
+
+    beforeEach(() => {
+        vi.stubEnv('KIMI_CODE_HOME', kimiHome);
+        mockedLoadTeamConfig.mockResolvedValue(kimiTeamConfig);
+    });
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('passes when kimi is enabled and config.toml carries the teamai hooks', async () => {
+        mockedLoadLocalConfig.mockResolvedValue({ ...mockLocalConfig, enabledAgents: ['kimi'] });
+        mockedReadFileSafe.mockImplementation(kimiFiles(KIMI_CONFIG_WITH_HOOKS));
+
+        await doctor({});
+
+        expect(kimiLine()).toContain('✔');
+    });
+
+    it('fails when kimi is enabled but config.toml has no teamai entries', async () => {
+        mockedLoadLocalConfig.mockResolvedValue({ ...mockLocalConfig, enabledAgents: ['kimi'] });
+        mockedReadFileSafe.mockImplementation(kimiFiles('default_model = "kimi-k2"\n'));
+
+        await doctor({});
+
+        expect(kimiLine()).toContain('✖');
+        expect(lines().some((m) => m.includes('teamai hooks inject'))).toBe(true);
+    });
+
+    it('fails with a run-Kimi-first fix when kimi is enabled but its home is missing', async () => {
+        mockedLoadLocalConfig.mockResolvedValue({ ...mockLocalConfig, enabledAgents: ['kimi'] });
+        mockedPathExists.mockImplementation(async (p: string) => !p.startsWith(kimiHome));
+        mockedReadFileSafe.mockImplementation(kimiFiles(null));
+
+        await doctor({});
+
+        expect(kimiLine()).toContain('✖');
+        expect(lines().some((m) => m.includes(`Run Kimi Code once to create ${kimiHome}`))).toBe(true);
+    });
+
+    it('skips the check when kimi is neither enabled nor installed', async () => {
+        mockedPathExists.mockImplementation(async (p: string) => !p.includes('kimi'));
+
+        await doctor({});
+
+        expect(kimiLine()).toBeUndefined();
+    });
+
+    it('skips the check when kimi is disabled', async () => {
+        mockedLoadLocalConfig.mockResolvedValue({ ...mockLocalConfig, disabledAgents: ['kimi'] });
+
+        await doctor({});
+
+        expect(kimiLine()).toBeUndefined();
     });
 });

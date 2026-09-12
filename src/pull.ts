@@ -12,7 +12,7 @@ import { injectClaudeMdSection, removeClaudeMdSection } from './utils/claudemd.j
 import { getHandler, RulesHandler, DocsHandler, EnvHandler, AgentsHandler } from './resources/index.js';
 import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
-import { ruleFileExtensionForTool } from './resources/rule-format.js';
+import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import { loadTagsConfig, filterByTags } from './utils/tags.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
@@ -1527,7 +1527,8 @@ async function syncManagedInstructions(
   if (compiledCulture !== undefined) {
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(config, localConfig))) {
       if (isAgentExcluded(localConfig, tool) || !toolPath.claudemd) continue;
-      if (toolPath.rules && !await isToolInstalledForConfig(tool, toolPath.rules, localConfig)) continue;
+      const installRoot = instructionInstallRoot(tool, toolPath);
+      if (installRoot && !await isToolInstalledForConfig(tool, installRoot, localConfig)) continue;
 
       const claudeMdPath = path.join(resolveToolBaseDir(tool, localConfig), toolPath.claudemd);
       try {
@@ -1558,7 +1559,8 @@ async function syncManagedInstructions(
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(config, localConfig))) {
       if (isAgentExcluded(localConfig, tool) || !toolPath.claudemd) continue;
-      if (toolPath.rules && !await isToolInstalledForConfig(tool, toolPath.rules, localConfig)) continue;
+      const installRoot = instructionInstallRoot(tool, toolPath);
+      if (installRoot && !await isToolInstalledForConfig(tool, installRoot, localConfig)) continue;
 
       const claudeMdPath = path.join(resolveToolBaseDir(tool, localConfig), toolPath.claudemd);
       try {
@@ -1802,7 +1804,9 @@ async function reinjectLegacyHooks(localConfig: LocalConfig): Promise<void> {
     const universe = hookFilter ?? Object.keys(teamConfig.toolPaths);
     hookFilter = universe.filter((t) => !disabled.includes(t));
   }
-  await injectHooksToAllTools(teamConfig.toolPaths, baseDir, hookFilter);
+  // hookFilter may be the widened "all minus disabled" set; only enabledAgents
+  // counts as an explicit choice for the missing-kimi-home warning.
+  await injectHooksToAllTools(teamConfig.toolPaths, baseDir, hookFilter, localConfig.enabledAgents ?? []);
   log.debug('Hooks migrated to dispatch format');
 }
 
