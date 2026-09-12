@@ -6,6 +6,10 @@ import type { ToolName } from '../resources/agent-format.js';
  *
  * CodeBuddy IDE passes tool names like `execute_command`, `search_content` etc.
  * while teamai hooks expect CLI-style names like `Bash`, `Grep`.
+ *
+ * Kimi Code CLI uses Claude-style names for most tools but calls its todo
+ * tool `TodoList`; it is mapped here so the todo hint handler (keyed on
+ * `TodoWrite`) sees one name.
  */
 
 const IDE_TO_CLI: Record<string, string> = {
@@ -19,6 +23,8 @@ const IDE_TO_CLI: Record<string, string> = {
   read_file: 'Read',
   task: 'Task',
   skill: 'Skill',
+  // Kimi Code CLI
+  TodoList: 'TodoWrite',
 };
 
 export function normalizeToolName(name: string): string {

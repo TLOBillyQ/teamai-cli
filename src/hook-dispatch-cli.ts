@@ -28,6 +28,7 @@ import { resolveHookCwd } from './utils/hook-cwd.js';
 import { windowsPowerShell } from './utils/powershell.js';
 import { log, setStderrOnly } from './utils/logger.js';
 import { deriveDispatchSessionId } from './utils/session-id.js';
+import { normalizeToolName } from './utils/tool-names.js';
 
 /**
  * Max time to wait for STDIN EOF before proceeding with whatever was received.
@@ -413,6 +414,10 @@ export async function hookDispatchCli(
 ): Promise<void> {
   const { bgOnly = false, stdinFile } = options;
   setStderrOnly(true);
+  // Hosts register the matcher in their own tool vocabulary (kimi: `TodoList`)
+  // while the handler registry keys on Claude-style names (`TodoWrite`), so
+  // route on the normalized name. Idempotent for names already in CLI form.
+  matcher = normalizeToolName(matcher);
   try {
     const raw = stdinFile ? readStdinFile(stdinFile) : await readStdin();
     const stdin = parseStdin(raw, event);

@@ -71,11 +71,11 @@ describe('promptForSelfModeAgents — interactive Auto option', () => {
     expect(result).toEqual(['cursor']);
   });
 
-  it('offers exactly 9 options (Auto + 8 tools)', async () => {
+  it('offers exactly 10 options (Auto + 9 tools)', async () => {
     vi.mocked(askSelection).mockResolvedValueOnce([0]);
     await promptForSelfModeAgents({});
     const [, itemCount] = vi.mocked(askSelection).mock.calls[0];
-    expect(itemCount).toBe(9);
+    expect(itemCount).toBe(10);
   });
 
   it('renders "none detected" when HOME has no known tools, and Auto → claude', async () => {

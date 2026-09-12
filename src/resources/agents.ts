@@ -28,6 +28,7 @@ import {
   reverseFromKiro,
   reverseFromOpencode,
   reverseFromWorkbuddy,
+  reverseFromKimi,
   mergeReverseResults,
   ALL_SUPPORTED_TOOLS,
   AGENT_FILE_EXTENSIONS,
@@ -1141,5 +1142,7 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
       return reverseFromOpencode(filePath, content);
     case 'workbuddy':
       return reverseFromWorkbuddy(filePath, content);
+    case 'kimi':
+      return reverseFromKimi(filePath, content);
   }
 }
