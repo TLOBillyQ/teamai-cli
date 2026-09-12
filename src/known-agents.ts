@@ -18,7 +18,7 @@ import { getUserHome } from './utils/home.js';
  * against the user's HOME in non-interactive contexts. Order is the display order.
  * Kept small on purpose — the common coding agents, not the full KNOWN_AGENTS list.
  */
-export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'joycode', 'codebuddy', 'workbuddy'] as const;
+export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'joycode', 'codebuddy', 'workbuddy', 'kimi'] as const;
 
 /**
  * Normalize the `--agent` option into a deduplicated id list.
@@ -86,6 +86,7 @@ export const KNOWN_AGENTS: KnownAgent[] = [
   { id: 'cursor', displayName: 'Cursor', category: 'coding', skillsPath: '.cursor/skills' },
   { id: 'joycode', displayName: 'JoyCode', category: 'coding', skillsPath: '.joycode/skills' },
   { id: 'codebuddy', displayName: 'CodeBuddy', category: 'coding', skillsPath: '.codebuddy/skills' },
+  { id: 'kimi', displayName: 'Kimi Code CLI', category: 'coding', skillsPath: '.kimi-code/skills' },
 
   // Additional coding agents from skills-manage
   { id: 'gemini', displayName: 'Gemini CLI', category: 'coding', skillsPath: '.gemini/skills' },

@@ -30,6 +30,8 @@ import {
   renderForCursor,
   renderForJoycode,
   renderForOpencode,
+  renderForKimi,
+  reverseFromKimi,
   reverseFromClaude,
   reverseFromCodebuddy,
   reverseFromCodex,
@@ -491,6 +493,93 @@ describe('reverseFromOpencode', () => {
   });
 });
 
+// ─── renderForKimi / reverseFromKimi ─────────────────────────────────────────
+
+describe('renderForKimi', () => {
+  it('emits name/description and a YAML-list tools allowlist in Kimi ids', () => {
+    const { ext, content } = renderForKimi(makeSpec({ tools: ['Read', 'Grep'] }));
+    expect(ext).toBe('.md');
+    expect(content).toContain('name: test-agent');
+    expect(content).toContain('description: A test agent for unit tests');
+    // Kimi wants a YAML sequence of module:ClassName ids, not Claude's
+    // comma-separated short names.
+    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.file:ReadFile'\n  - 'kimi_cli\.tools\.file:Grep'/);
+  });
+
+  it('accepts the comma-separated tools string a Claude-format source (built-in teamai-recall) yields', () => {
+    const claudeSource = `---\nname: teamai-recall\ndescription: Recall team knowledge\ntools: Bash, Read, Grep, Glob\n---\nSearch the knowledge base.\n`;
+    const parsed = reverseFromClaude('/agents/teamai-recall.md', claudeSource);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const { content } = renderForKimi(parsed.spec);
+    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.shell:Shell'\n  - 'kimi_cli\.tools\.file:ReadFile'\n  - 'kimi_cli\.tools\.file:Grep'\n  - 'kimi_cli\.tools\.file:Glob'/);
+  });
+
+  it('passes unknown tool names through unchanged (Kimi ids, MCP tools)', () => {
+    const { content } = renderForKimi(makeSpec({ tools: ['Bash', 'kimi_cli.tools.think:Think', 'mcp__jira__search'] }));
+    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.shell:Shell'\n  - 'kimi_cli\.tools\.think:Think'\n  - mcp__jira__search/);
+    expect(content).toContain('You are a helpful assistant.');
+  });
+
+  it('does NOT emit model (Kimi has no such frontmatter field)', () => {
+    const { content } = renderForKimi(makeSpec({ model: 'kimi-k2' }));
+    expect(content).not.toMatch(/^model:/m);
+  });
+
+  it('flattens tool_extras.kimi (whenToUse / disallowedTools) into frontmatter', () => {
+    const spec = makeSpec({ tool_extras: { kimi: { whenToUse: 'PR checks', disallowedTools: ['Bash'] } } });
+    const { content } = renderForKimi(spec);
+    expect(content).toContain('whenToUse: PR checks');
+    expect(content).toMatch(/disallowedTools:\n  - Bash/);
+  });
+
+  it('renderForTool dispatches kimi to renderForKimi', () => {
+    const spec = makeSpec();
+    expect(renderForTool(spec, 'kimi')).toEqual(renderForKimi(spec));
+  });
+});
+
+describe('reverseFromKimi', () => {
+  it('reads name/description/tools and namespaces the rest under tool_extras.kimi', () => {
+    const content = `---\nname: reviewer\ndescription: Strict reviewer\ntools:\n  - Read\nsubagents:\n  - coder\n---\nReview the diff.\n`;
+    const result = reverseFromKimi('/agents/reviewer.md', content);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.name).toBe('reviewer');
+    expect(result.spec.tools).toEqual(['Read']); // short names are kept as-is
+    expect(result.spec.tool_extras?.['kimi']).toEqual({ subagents: ['coder'] });
+  });
+
+  it('maps Kimi tool ids back to short names', () => {
+    const content = `---\ndescription: d\ntools:\n  - kimi_cli.tools.shell:Shell\n  - kimi_cli.tools.agent:Agent\n  - mcp__jira__search\n---\nBody\n`;
+    const result = reverseFromKimi('/agents/a.md', content);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.tools).toEqual(['Bash', 'Task', 'mcp__jira__search']);
+  });
+
+  it('defaults name to the filename when absent', () => {
+    const result = reverseFromKimi('/agents/from-file.md', `---\ndescription: d\n---\nBody\n`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.name).toBe('from-file');
+  });
+
+  it('returns error on missing description or empty body', () => {
+    expect(reverseFromKimi('/agents/a.md', `---\nname: a\n---\nBody\n`).ok).toBe(false);
+    expect(reverseFromKimi('/agents/a.md', `---\ndescription: d\n---\n\n`).ok).toBe(false);
+  });
+
+  it('round-trips render → reverse preserving common fields', () => {
+    const spec = makeSpec({ tools: ['Read', 'Glob'] });
+    const { content } = renderForKimi(spec);
+    const result = reverseFromKimi('/agents/test-agent.md', content);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec).toEqual(spec);
+  });
+});
+
 // ─── mergeReverseResults ─────────────────────────────────────────────────────
 
 describe('mergeReverseResults', () => {
@@ -768,7 +857,7 @@ describe('AgentsHandler.pullItem — multi-target', () => {
     expect(candidates[0].mergedSpec).toEqual(makeSpec({ targets: ['joycode'], tool_extras: { cursor: { composer_mode: true } } }));
   });
 
-  it.each(['codex', 'cursor', 'opencode'] as const)('retains canonical fields not rendered by %s', async (tool) => {
+  it.each(['codex', 'cursor', 'opencode', 'kimi'] as const)('retains canonical fields not rendered by %s', async (tool) => {
     const spec = makeSpec({ targets: [tool], model: 'canonical-model', tools: ['Read'],
       tool_extras: { joycode: { color: 'blue' } } });
     const yamlPath = path.join(repoPath, 'agents/test-agent.yaml');

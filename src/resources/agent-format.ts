@@ -6,7 +6,7 @@ import { getDispatchCommand } from '../builtin-hooks.js';
 
 // ─── Tool name type ──────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'copilot' | 'joycode' | 'qoder' | 'kiro' | 'zcode' | 'omp' | 'opencode';
+export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'copilot' | 'joycode' | 'qoder' | 'kiro' | 'zcode' | 'omp' | 'opencode' | 'kimi';
 
 export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'claude',
@@ -24,6 +24,7 @@ export const ALL_SUPPORTED_TOOLS: ToolName[] = [
   'zcode',
   'omp',
   'opencode',
+  'kimi',
 ];
 
 export type AgentFileExtension = '.agent.md' | '.md' | '.toml' | '.json';
@@ -101,6 +102,7 @@ export interface AgentSpec {
     zcode?: Record<string, unknown>;
     omp?: Record<string, unknown>;
     opencode?: Record<string, unknown>;
+    kimi?: Record<string, unknown>;
   };
   /**
    * Which tools this agent should be deployed to.
@@ -393,6 +395,75 @@ export function renderForOpencode(spec: AgentSpec): RenderResult {
   return { ext: agentFileExtensionForTool('opencode'), content };
 }
 
+/**
+ * Render an AgentSpec for Kimi Code CLI.
+ * Output: YAML frontmatter (.md) with name/description and a YAML-list `tools`
+ * allowlist, matching Kimi's documented agent file format. Kimi has no `model`
+ * frontmatter field, so the common `model` is not emitted. Kimi-only fields
+ * (whenToUse / disallowedTools / subagents / override) travel in
+ * tool_extras.kimi and are flattened into the frontmatter.
+ */
+/**
+ * Kimi addresses built-in tools by `module:ClassName`, not by the short names
+ * Claude-style agent specs use. Without this map a spec (or the built-in
+ * teamai-recall agent) saying `tools: [Bash, Read]` would hand Kimi an
+ * allowlist of names it does not know. Names outside the map pass through
+ * untouched so teams can write Kimi ids or MCP tools directly.
+ */
+const KIMI_TOOL_IDS: Record<string, string> = {
+  Bash: 'kimi_cli.tools.shell:Shell',
+  Read: 'kimi_cli.tools.file:ReadFile',
+  Write: 'kimi_cli.tools.file:WriteFile',
+  Edit: 'kimi_cli.tools.file:StrReplaceFile',
+  Glob: 'kimi_cli.tools.file:Glob',
+  Grep: 'kimi_cli.tools.file:Grep',
+  WebFetch: 'kimi_cli.tools.web:FetchURL',
+  WebSearch: 'kimi_cli.tools.web:SearchWeb',
+  Task: 'kimi_cli.tools.agent:Agent',
+  Agent: 'kimi_cli.tools.agent:Agent',
+};
+const KIMI_TOOL_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(KIMI_TOOL_IDS)
+    .filter(([name]) => name !== 'Agent') // Task and Agent share an id; reverse to Task
+    .map(([name, id]) => [id, name]),
+);
+
+function normalizeToolList(tools: unknown): string[] {
+  if (Array.isArray(tools)) return tools.map(String).map((t) => t.trim()).filter((t) => t !== '');
+  if (typeof tools === 'string') return tools.split(',').map((t) => t.trim()).filter((t) => t !== '');
+  return [];
+}
+
+export function toKimiToolId(tool: string): string {
+  return KIMI_TOOL_IDS[tool] ?? tool;
+}
+
+export function fromKimiToolId(id: string): string {
+  return KIMI_TOOL_NAMES[id] ?? id;
+}
+
+export function renderForKimi(spec: AgentSpec): RenderResult {
+  const frontmatterData: Record<string, unknown> = {
+    name: spec.name,
+    description: spec.description,
+  };
+  // Claude-style sources carry `tools: Bash, Read` as one comma-separated
+  // string, and reverseFromClaude passes that through untouched despite the
+  // string[] type, so accept both shapes here.
+  const tools = normalizeToolList(spec.tools);
+  if (tools.length > 0) {
+    frontmatterData['tools'] = tools.map(toKimiToolId);
+  }
+  const extras = spec.tool_extras?.['kimi'];
+  if (extras) {
+    for (const [key, value] of Object.entries(extras)) {
+      frontmatterData[key] = value;
+    }
+  }
+  const content = matter.stringify(spec.instructions, frontmatterData);
+  return { ext: agentFileExtensionForTool('kimi'), content };
+}
+
 // ─── Internal render helpers ─────────────────────────────────────────────────
 
 /**
@@ -453,6 +524,8 @@ const COMMON_CURSOR_FIELDS = new Set(['agent_id', 'description', 'model', 'tools
 const COMMON_COPILOT_FIELDS = new Set(['name', 'description', 'model', 'tools']);
 const COMMON_CODEX_FIELDS = new Set(['name', 'description', 'developer_instructions', 'model']);
 const COMMON_KIRO_FIELDS = new Set(['name', 'description', 'prompt', 'model', 'tools']);
+// Kimi has no `model` field; anything else non-common stays in tool_extras.kimi.
+const COMMON_KIMI_FIELDS = new Set(['name', 'description', 'tools']);
 // `mode` is not carried to the AgentSpec root — it is an OpenCode-only concept
 // (teamai always renders `subagent`), so it round-trips through tool_extras.opencode.
 const COMMON_OPENCODE_FIELDS = new Set(['description', 'model']);
@@ -731,6 +804,45 @@ export function reverseFromOpencode(filePath: string, content: string): ReverseR
   return { ok: true, spec };
 }
 
+/**
+ * Reverse a Kimi Code CLI agent .md file into an AgentSpec.
+ * `name` defaults to the filename when absent (Kimi's own rule). Everything
+ * outside name/description/tools is namespaced under tool_extras.kimi.
+ */
+export function reverseFromKimi(filePath: string, content: string): ReverseResult {
+  let parsed: matter.GrayMatterFile<string>;
+  try {
+    parsed = matter(content);
+  } catch (err) {
+    return { ok: false, reason: `parse error: ${(err as Error).message}` };
+  }
+
+  const fm = parsed.data as Record<string, unknown>;
+  const body = parsed.content.trim();
+
+  const name = (fm['name'] as string | undefined) ?? path.basename(filePath, '.md');
+  if (!name) return { ok: false, reason: 'missing field name' };
+  if (!fm['description']) return { ok: false, reason: 'missing field description' };
+  if (!body) return { ok: false, reason: 'missing field instructions (empty body)' };
+
+  const extras: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fm)) {
+    if (!COMMON_KIMI_FIELDS.has(key)) {
+      extras[key] = value;
+    }
+  }
+
+  const spec: AgentSpec = {
+    name,
+    description: fm['description'] as string,
+    instructions: body,
+  };
+  if (Array.isArray(fm['tools'])) spec.tools = (fm['tools'] as string[]).map(fromKimiToolId);
+  if (Object.keys(extras).length > 0) spec.tool_extras = { kimi: extras };
+
+  return { ok: true, spec };
+}
+
 // ─── Merge multi-tool reverse results ───────────────────────────────────────
 
 /** Conflict details when merging results from multiple tools. */
@@ -846,5 +958,6 @@ export function renderForTool(spec: AgentSpec, tool: ToolName): RenderResult {
     case 'zcode': return renderForClaude(spec);
     case 'omp': return renderForClaude(spec);
     case 'opencode': return renderForOpencode(spec);
+    case 'kimi': return renderForKimi(spec);
   }
 }

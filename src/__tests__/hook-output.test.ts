@@ -57,3 +57,17 @@ describe('formatStopHookOutput', () => {
 it.each(['codex', 'Codex'])('%s Stop uses a non-blocking common output field', (tool) => {
   expect(JSON.parse(formatStopHookOutput('hint', tool))).toEqual({ systemMessage: 'hint' });
 });
+
+// Kimi Code CLI's Stop hook only honours block decisions: a non-blocking
+// stdout is dropped, while `permissionDecision: "deny"` appends the reason as a
+// stop_hook user message and lets the model run one more turn — the same
+// semantics Claude's additionalContext / Cursor's followup_message provide.
+it.each(['kimi', 'Kimi'])('%s Stop uses kimi permissionDecision deny with the hint as reason', (tool) => {
+  expect(JSON.parse(formatStopHookOutput('hint', tool))).toEqual({
+    hookSpecificOutput: {
+      hookEventName: 'Stop',
+      permissionDecision: 'deny',
+      permissionDecisionReason: 'hint',
+    },
+  });
+});

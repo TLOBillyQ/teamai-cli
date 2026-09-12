@@ -31,6 +31,36 @@ export function usesCopilotInstructions(tool: string): boolean {
 }
 
 /**
+ * Tools with no rules directory at all. Kimi Code CLI only loads instructions
+ * from AGENTS.md, and it does not expand `@file` references there, so the only
+ * way a team rule reaches the model is its full text inside that file. For
+ * these tools teamai inlines every rule body into a managed block in the
+ * tool's `claudemd` file instead of copying files (which the tool would
+ * silently ignore).
+ */
+const INLINE_INSTRUCTION_RULE_TOOLS = new Set(['kimi']);
+
+/** True when the tool receives team rules inlined into its instructions file. */
+export function inlinesRulesIntoInstructions(tool: string): boolean {
+  return INLINE_INSTRUCTION_RULE_TOOLS.has(tool);
+}
+
+/**
+ * Directory whose presence decides whether instruction-file injection (culture,
+ * shared instructions) is allowed for a tool. Tools with a rules dir are gated
+ * on it, as before. Tools that inline rules have no rules dir, so their skills
+ * root stands in — otherwise a non-user would get `.kimi-code/AGENTS.md`
+ * conjured. Every other tool keeps its historical ungated behaviour.
+ */
+export function instructionInstallRoot(
+  tool: string,
+  toolPath: { rules?: string; skills?: string },
+): string | undefined {
+  if (toolPath.rules) return toolPath.rules;
+  return inlinesRulesIntoInstructions(tool) ? toolPath.skills : undefined;
+}
+
+/**
  * Every extension a rule file may carry on disk, newest layout first.
  *
  * Writers use `ruleFileExtensionForTool`; scanners and deleters use this list so
