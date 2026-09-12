@@ -1596,6 +1596,7 @@ export async function reconcileHooksToAllTools(
   teamDefs: HookDef[],
   manifestPath: string,
   opts: { removeAll?: boolean; builtinOverride?: BuiltinHookOverride; filterAgents?: string[]; explicitAgents?: string[]; settingsOnly?: boolean; installedBaseDir?: string; teamHookProjectRoot?: string; scope?: Scope; builtinsOnly?: BuiltinsOnly } = {},
+): Promise<void> {
   // Without the manifest, reconcileHooks manages the built-in entries only.
   const teamManifestPath = opts.builtinsOnly ? undefined : manifestPath;
   const defs = opts.builtinsOnly ? [] : teamDefs;

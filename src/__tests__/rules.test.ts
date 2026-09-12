@@ -39,7 +39,6 @@ import { RulesHandler } from '../resources/rules.js';
 import { loadStateForScope } from '../config.js';
 import type { TeamaiConfig, LocalConfig, State } from '../types.js';
 import { instructionInstallRoot } from '../resources/rule-format.js';
-import type { TeamaiConfig, LocalConfig } from '../types.js';
 
 describe('RulesHandler.scanLocalForPush — modified rule detection', () => {
   let tmpDir: string;
@@ -971,7 +970,7 @@ describe('RulesHandler.pullAllRules — OpenCode instructions activation', () =>
     handler = new RulesHandler();
     teamConfig = {
       team: 'test', description: '', repo: 'r', provider: 'tgit' as const, reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       toolPaths: {
         opencode: {
           skills: '.opencode/skills', rules: '.opencode/rules', agents: '.opencode/agents',
@@ -1049,7 +1048,7 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
     handler = new RulesHandler();
     teamConfig = {
       team: 'test', description: '', repo: 'r', provider: 'tgit' as const, reviewers: [],
-      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      sharing: { skills: {}, docs: { localDir: '' }, env: { injectShellProfile: true } },
       toolPaths: {
         kimi: { skills: '.kimi-code/skills', agents: '.kimi-code/agents', claudemd: '.kimi-code/AGENTS.md' },
       },
@@ -1120,6 +1119,29 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
 
     await handler.pullAllRules(teamConfig, localConfig);
     expect(await fse.pathExists(path.join(homeDir, '.kimi-code'))).toBe(false);
+  });
+
+  it('inlines rules in name order regardless of the filesystem readdir order', async () => {
+    await fse.ensureDir(path.join(localConfig.repo.localPath, 'rules', 'sub'));
+    await fse.writeFile(teamRule('b-rule'), 'RULE B');
+    await fse.writeFile(teamRule('a-rule'), 'RULE A');
+    await fse.writeFile(teamRule('sub/c-rule'), 'RULE C');
+    await fse.writeFile(teamRule('z-rule'), 'RULE Z');
+
+    // Simulate a hash-ordered filesystem (e.g. ext4) by reversing readdir output.
+    const realReaddir = fse.readdir.bind(fse) as (...args: unknown[]) => Promise<unknown[]>;
+    const spy = vi.spyOn(fse, 'readdir').mockImplementation((async (...args: unknown[]) =>
+      (await realReaddir(...args)).reverse()) as never);
+    try {
+      await handler.pullAllRules(teamConfig, localConfig);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const content = await fse.readFile(agentsMd(), 'utf8');
+    const order = ['RULE A', 'RULE B', 'RULE C', 'RULE Z'].map((r) => content.indexOf(r));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((x, y) => x - y));
   });
 });
 

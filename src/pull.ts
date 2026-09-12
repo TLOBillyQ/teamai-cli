@@ -17,12 +17,14 @@ import { reconcilePlacementRecords } from './utils/pending-push.js';
 import { injectClaudeMdSection, removeClaudeMdSection } from './utils/claudemd.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler, AgentsHandler } from './resources/index.js';
 import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } from './resources/docs.js';
-import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
+import { isToolInstalledForConfig, ResourceHandler } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
+import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
 import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, State } from './types.js';
+import { toolInstallRoot } from './types.js';
 import {
   getUserLearningsDir,
   TEAMAI_CULTURE_START,
@@ -1140,7 +1142,6 @@ async function pullForScope(
   let skillsHeld = false;
   // Set on the same collision among agents.
   let agentsHeld = false;
-  let knownRepoSkillNames: Set<string> | null = null;
   // name → team-repo source dir, for the data-safety check in Step 3b cleanup.
   let knownRepoSkillSources: Map<string, string> | null = null;
 
@@ -1230,11 +1231,27 @@ async function pullForScope(
         skillsHeld = true;
         continue;
       }
-      items = desired.items;
+      // A name the team repo holds at more than one path is ambiguous — the
+      // group is not part of the installed name. It is skipped and reported
+      // (exit code 1); every other skill still syncs.
+      // A name an active-namespace skill overrides at the root (#707) is
+      // already resolved, whatever other copies of it the repo holds. Among tag
+      // matches the root skill wins over a same-name skill of an inactive
+      // namespace, so that pair is not a collision either.
+      const overriddenNames = new Set(desired.overrides.map((o) => o.name));
+      const rootNames = new Set(desired.teamItems.filter((item) => !item.namespace).map((item) => item.name));
+      const activeSkillNamespaces = roleContext?.activeNamespaces.skills ?? [];
+      const candidates = desired.teamItems.filter((item) => !overriddenNames.has(item.name)
+        && !(roleContext && item.namespace && rootNames.has(item.name) && !activeSkillNamespaces.includes(item.namespace)));
+      const duplicates = findDuplicateSkillNames(candidates);
+      const ambiguous = new Set(duplicates.map((d) => d.name));
+      reportDuplicateSkills(duplicates, `[${scopeLabel}] `);
+      items = desired.items.filter((item) => !ambiguous.has(item.name));
       skippedByTags = desired.skippedByTags;
       desiredSkillNames = new Set(items.map((i) => i.name));
-      knownRepoSkillNames = new Set(desired.teamItems.map((i) => i.name));
-      knownRepoSkillSources = new Map(desired.teamItems.map((i) => [i.name, i.sourcePath]));
+      knownRepoSkillSources = new Map(desired.teamItems
+        .filter((item) => !ambiguous.has(item.name))
+        .map((item) => [item.name, item.sourcePath]));
     } else if (type === 'agents') {
       const desired = await resolveDesiredAgents(freshConfig, localConfig, roleContext);
       if (desired.kind === 'conflict') {
@@ -1325,7 +1342,7 @@ async function pullForScope(
   }
 
   // Step 3b: Clean up local skills not in the desired union set (role + tags)
-  if (!options.dryRun && desiredSkillNames && knownRepoSkillNames) {
+  if (!options.dryRun && desiredSkillNames && knownRepoSkillSources) {
     const baseDir = resolveBaseDir(localConfig);
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(freshConfig, localConfig))) {
@@ -1339,7 +1356,7 @@ async function pullForScope(
       for (const dir of localDirs) {
         if (BUILTIN_SKILL_NAMES.has(dir)) continue;
         if (desiredSkillNames.has(dir)) continue;
-        if (!knownRepoSkillNames.has(dir)) continue;
+        if (!knownRepoSkillSources.has(dir)) continue;
         const skillDir = path.join(skillsDir, dir);
         // Same data-safety gate as cleanupInactiveNamespaceSkills: never delete a
         // deployed skill that differs from its team-repo source (local edits or

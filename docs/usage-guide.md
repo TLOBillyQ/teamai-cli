@@ -675,6 +675,9 @@ When the namespace stops being active, the next pull delivers the root item agai
 
 Put shared content that a project may need to override at the root, not in a namespace every role activates. A root item gives way to an active namespace; a namespace item never does. For example, keep the company's `rules/code-style.md` at the root, and a checkout project that needs different conventions adds `rules/checkout/code-style.md`. Members with `checkout` active get the project's version, and everyone else keeps the shared one. Had the shared rule lived in `rules/common/code-style.md`, a checkout member would receive both.
 
+**Skill names are unique across groups.** Team repo skills may live at `skills/<name>/` or one level down in a group, `skills/<group>/<name>/`. The group is not part of the installed name (both install flat as `<tool skills dir>/<name>`), so a skill name must be unique across the top level and every group. If the same name appears at more than one path (for example `skills/mattpocock/code-review` and `skills/team/code-review`), `teamai pull` skips that skill (a copy installed by an earlier pull is left untouched), installs everything else and exits non-zero, and `teamai push` refuses that skill and exits non-zero (your other changes are still offered); both print every conflicting path. Rename one of them to resolve it. Tag-subscribed skills are part of the same check: one that shares its name with another skill pull would install is skipped the same way. There is no precedence rule between groups.
+
+
 ### Team packages
 
 `teamai packages` lets a team declare and restore npm packages and Claude Code plugins through the existing team repository. TeamAI invokes the native `npm` and `claude plugin` CLIs; it does not distribute package contents itself.
@@ -1871,10 +1874,9 @@ Kimi Code CLI is a built-in target (`--agent kimi`), detected from `~/.kimi-code
 
 - **Skills** land in `.kimi-code/skills/` (Kimi scans it directly, alongside `.agents/skills/`).
 - **Subagents** are rendered into `.kimi-code/agents/*.md` using the [current Kimi Markdown format](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents): `name`, `description` and a YAML-list `tools` allowlist with case-sensitive names such as `Bash`, `Read`, `Grep`, and `Glob` (`Task` maps to `Agent`). Known legacy Python tool ids from previous TeamAI output are converted to current names on render and reverse sync; unknown names and MCP patterns such as `mcp__jira__*` remain unchanged. Explicit `tools: []` still disables all tools. The same conversion applies to `tools` and `disallowedTools` overrides in `tool_extras.kimi`. After upgrading TeamAI, run `teamai pull --force` to refresh existing built-in and team agents; repeat pulls retain the corrected names. This target supports current Markdown agents, not the legacy Python CLI's separate `version`/`agent` YAML format. The common `model` field is not emitted; Kimi-only fields (`whenToUse`, `disallowedTools`, `subagents`, `override`) round-trip through `tool_extras.kimi`.
-- **Rules** are **inlined** into a teamai-managed block (`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`) of `.kimi-code/AGENTS.md`, the one file Kimi injects into its system prompt. Rule frontmatter (`paths:` …) is stripped, so a path-scoped rule applies to every task in Kimi; your own content outside the block is preserved; the block is removed when the team's last rule goes away. Nothing is copied into `.kimi-code/rules/` because Kimi would never read it.
+- **Rules** are **inlined** into a teamai-managed block (`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`) of `.kimi-code/AGENTS.md`, the one file Kimi injects into its system prompt. Rules appear in the order of their path under the team repo's `rules/` directory (sorted by name, each subdirectory in place), so every machine generates the same block regardless of filesystem. Rule frontmatter (`paths:` …) is stripped, so a path-scoped rule applies to every task in Kimi; your own content outside the block is preserved; the block is removed when the team's last rule goes away. Nothing is copied into `.kimi-code/rules/` because Kimi would never read it.
 - **Culture, shared instructions and the recall block** are injected into the same `.kimi-code/AGENTS.md` (the recall block and the built-in `teamai-recall` subagent only when recall is enabled, see `teamai recall status`). All of this only happens when `.kimi-code/` exists for the scope (or you enabled `kimi` explicitly) — teamai never creates it for someone who doesn't use Kimi.
 - **Hooks** live in the user-level `~/.kimi-code/config.toml` (see the hooks note above). If that directory does not exist yet, pull skips them (with a `Kimi Code hooks skipped: ...` warning when kimi is enabled) — run Kimi Code once, then pull again. `teamai doctor` checks that `config.toml` carries the teamai entries.
->>>>>>> 337aa90 (feat(kimi): support Kimi Code CLI as a first-class target)
 
 ### Qoder
 
@@ -1953,6 +1955,8 @@ teamai remove rules <name> --force   # Skip the prompt, for scripts and CI
 `teamai doctor` exits with code 0 only when every check passes, and code 1 when any check fails. Before initialization, it reports the missing configuration without assuming a Git provider. The same checks run at the end of a manual `teamai pull`, minus the provider ones and minus any check that pull already reported in its own words on that run. A check marked informational — currently only `No stale env blocks left behind` — still counts toward `doctor`'s exit code, but a pull does not fold its failure into `Pull finished, but N check(s) failed`: a leftover file from an earlier install is cleanup, not a sign this pull broke anything, so it is still named but on its own, gentler line.
 
 Besides the provider, clone, config and hook checks, `doctor` verifies what reached your machine. `<tool> is installed` fails when `enabledAgents` lists a tool that nothing would be delivered to, which is the case where a pull reports success and that tool receives nothing. It asks the same resolver the sync uses, so a tool that keeps its skills somewhere other than its tool root, as OpenClaw does with its workspace directory, is judged where the sync would actually write. It reports an installed tool as passing too, so `--json` carries one entry per enabled tool either way. The checks at the end of a pull cover the scope that pull resolved from the current directory; run `teamai doctor` in another scope to check that one. `Skills delivered to <tool>` compares the skills your role namespaces, tag subscriptions and exclusions resolve to against what is on disk for each installed tool: it reports a skill that was never delivered separately from one that arrived unreadable — `SKILL.md` missing, its frontmatter unparseable, or its `name` not matching the directory, which keeps the agent from ever discovering it. `Team docs delivered` compares the docs you receive (a docs namespace you do not have active is left out) against `sharing.docs.localDir`, which has one destination rather than one per tool; each expected document has to be a file that can be read, so a directory or a dangling link sitting on the name counts as missing. It also reports extra non-hidden local files as stale, including when the team bundle is empty. Hidden local files are preserved and do not fail this check, and neither does a local copy of a team doc in a namespace you do not have active: pull removes it when it is unchanged and names it when you edited it. `doctor` also prints notes, which are information rather than failed checks. Each note names a namespace skill, agent, rule, shared-instructions file, env variable, hook, MCP server or team model profile that replaces a root one here (`rules: "style" from rules/checkout/style.md replaces rules/style.md`). When a namespace contributes env variables, hooks, MCP servers or team model profiles, a note also counts where that type's entries come from (`env: 3 received here (2 root, 1 checkout)`). Without roles or projects, the notes name each file the team repo defines more than once instead, and each env variable, hook or MCP server name repeated in its root file.
+
+Skill selection is shared by pull and doctor. When selected groups or tag subscriptions contain the same installed skill name at different paths, doctor reports `Skills to deliver can be resolved` as failed and lists the conflicting paths; it does not treat an arbitrary copy as delivered. Pull skips ambiguous names, and cleanup keeps copies whose team-repo source is ambiguous.
 
 `Rules delivered to <tool>` and `Agents delivered to <tool>` do the same for the other two per-tool resources, and both ask the handler where an item lands rather than deriving a path: a rule's filename and content change per tool (`.md` verbatim, `.mdc` with derived `globs`/`alwaysApply`, `.instructions.md` with `applyTo`), and an agent's destination comes from its render, with `targets:` deciding which tools are owed a copy at all. A delivered rule is compared with the bytes the handler renders for that tool, not merely read for the keys its tool needs: a `.mdc` whose `globs` no longer match the team rule's `paths:` applies to the wrong files while carrying a perfectly legal `alwaysApply`, and that reads here as `delivered from an older copy` — the same label as a body that drifted, because both landed successfully and are still wrong. An agent is compared with the bytes its render produces, so a copy left behind by an older spec — a plain pull skips a scope whose team repo has not changed, so it can sit there indefinitely — is reported as `delivered from an older spec` rather than passing as present. `Every team agent reaches a tool` names an agent that renders for no installed tool — usually a spec that does not parse, or a `targets:` list naming only tools you do not have. These two are `doctor`-only: they read every rule per tool and parse every agent, which would spend the budget the checks at the end of a pull run under.
 
@@ -2226,7 +2230,6 @@ team: my-team
 description: Team AI resource repo
 repo: https://github.com/group/repo.git
 provider: github
-# scope: ignored if present — local install location is set by `teamai init --scope`
 
 reviewers:
   - reviewer1
@@ -2237,8 +2240,6 @@ packages:
       version: "*"
 
 sharing:
-  rules:
-    enforced: [code-review-guide]
   recall:
     enabled: false             # optional; members can override locally
   docs:
@@ -2260,9 +2261,37 @@ sharing:
         secret: my-signing-key # optional; enables the X-TeamAI-Signature header
         timeout: 5000          # optional; per-request timeout in ms (default 5000)
         retries: 3             # optional; retry attempts on failure (default 3)
+
+toolPaths:                     # optional; merged over the built-in table (see below)
+  claude:
+    skills: .claude/custom-skills
 ```
 
 `teamai pull` mirrors the non-hidden `docs/` files you receive (see [Docs by namespace](#docs)) into `sharing.docs.localDir`: documents deleted from the team repo are also deleted locally, even when the last document or the entire team directory is removed. Empty stale directories are removed; hidden files and directories are preserved. Use a dedicated docs destination, since local-only drafts are also removed. A destination that overlaps the team repo or contains the home/project root is rejected; if it is already the team's `docs/` directory, no copying or cleanup is needed. File/directory type changes at the same path are handled using staged replacements; failed replacements restore the conflicting local entries. If a directory to be replaced contains hidden local entries, move those entries first; the sync refuses to discard them. A failed copy stops cleanup. `teamai pull --dry-run` previews the sync without changing files; use `teamai pull --force` to clean residue from a revision already synced by an older CLI.
+
+Keys in `teamai.yaml` this CLI version does not recognize are ignored, so an old or misspelled key never breaks loading; `teamai doctor` lists them as a warning without failing.
+
+#### `toolPaths`
+
+`toolPaths` maps each tool (`claude`, `codex`, `kimi`, …) to the paths TeamAI installs into: `skills`, `rules`, `settings`, `claudemd`, `agents`, `mcp`, `mcpProject`, and `userScope` (user-scope overrides for `skills` / `rules` / `agents`). TeamAI ships a built-in table for every supported tool, so most team repos omit `toolPaths` entirely.
+
+When a team repo sets `toolPaths`, it is merged over the built-in table per tool and per field:
+
+- A built-in tool the team does not list keeps its default entry.
+- A field the team sets replaces only that field. Unset fields keep their defaults. `userScope` is merged the same way, field by field.
+- A tool that is not in the built-in table is added as written.
+- `false` removes a tool or a single field. `null` (or `~`, or an empty value, which is what YAML gives a key with only comments under it) keeps the default, the same as omitting the key.
+
+```yaml
+toolPaths:
+  claude:
+    skills: .claude/custom-skills   # only claude's skills path changes; all other tools and fields keep their defaults
+  kimi: false                       # stop installing into Kimi
+  codex:
+    rules: false                    # keep codex, but drop its rules path
+```
+
+Only list what you change. A full copy of the table pinned in the team repo still works, but it keeps the old values of every field it lists, so later changes to those defaults won't reach your team. Tools and fields added after you copied the table are filled in automatically.
 
 ### config.yaml (local config)
 

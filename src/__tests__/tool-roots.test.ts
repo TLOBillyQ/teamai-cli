@@ -68,7 +68,9 @@ describe('toolRoots — re-rooting a relocated tool', () => {
       // Project scope is anchored on the project root, not on the member's root.
       mcpProject: '.mcp.json',
     });
-    expect(paths.codex).toEqual(teamConfig.toolPaths.codex);
+    // codex carries a userScope claudemd, so user-scope resolution differs
+    // from the raw team declaration; compare against the no-toolRoots baseline.
+    expect(paths.codex).toEqual(scopedToolPaths(teamConfig, localConfig()).codex);
     expect(paths.tclaude).toEqual(teamConfig.toolPaths.tclaude);
     expect(paths.copilot).toEqual(scopedToolPaths(teamConfig, localConfig()).copilot);
   });
@@ -126,7 +128,9 @@ describe('toolRoots — re-rooting a relocated tool', () => {
     expect(paths.claude.mcp).toBe('.claude-work/.claude.json');
   });
 
-  it('adds no key for a field the team did not declare', () => {
+  it('moves every merged field, including defaults the team did not declare', () => {
+    // The team's sparse declaration merges over the built-in defaults, so the
+    // resolved paths carry every default field, all moved to the new root.
     const sparse = TeamaiConfigSchema.parse({
       team: 't',
       repo: 'r',
@@ -135,7 +139,15 @@ describe('toolRoots — re-rooting a relocated tool', () => {
     const paths = scopedToolPaths(sparse, localConfig({
       toolRoots: { claude: path.join(home, '.claude-work') },
     }));
-    expect(Object.keys(paths.claude).sort()).toEqual(['mcpProject', 'skills']);
+    expect(paths.claude).toEqual({
+      skills: '.claude-work/skills',
+      rules: '.claude-work/rules',
+      settings: '.claude-work/settings.json',
+      claudemd: '.claude-work/CLAUDE.md',
+      agents: '.claude-work/agents',
+      mcp: '.claude-work/.claude.json',
+      mcpProject: '.mcp.json',
+    });
   });
 
   it('moves fields the team spread over several roots, every one of them', () => {
@@ -165,6 +177,7 @@ describe('toolRoots — re-rooting a relocated tool', () => {
       skills: '.claude-work/skills',
       rules: '.claude-work/rules',
       settings: '.claude-work/settings.json',
+      claudemd: '.claude-work/CLAUDE.md',
       agents: '.claude-work/agents',
       mcp: '.claude-work/.claude.json',
       mcpProject: '.mcp.json',
@@ -224,6 +237,8 @@ describe('toolRoots — re-rooting a relocated tool', () => {
       skills: '.claude-work/skills',
       rules: '.claude-work/rules',
       agents: '.claude-work/agents',
+      claudemd: '.claude-work/CLAUDE.md',
+      settings: '.claude-work/settings.json',
       mcp: '.claude-work/claude.json',
       // Project scope is anchored on the project root.
       mcpProject: '.mcp.json',

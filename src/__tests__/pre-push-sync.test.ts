@@ -671,6 +671,21 @@ describe('syncTeamUpdatesToLocal — skills', () => {
     expect(content).toBe('v2 namespaced');
   });
 
+  it('should not sync a skill whose name is ambiguous across team groups', async () => {
+    await fse.ensureDir(path.join(repoPath, 'skills', 'a', 'x'));
+    await fse.writeFile(path.join(repoPath, 'skills', 'a', 'x', 'SKILL.md'), 'v2 from a');
+    await fse.ensureDir(path.join(repoPath, 'skills', 'b', 'x'));
+    await fse.writeFile(path.join(repoPath, 'skills', 'b', 'x', 'SKILL.md'), 'v2 from b');
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'x');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), 'v1');
+    mockGetFileContentAtRev.mockResolvedValue(Buffer.from('v1'));
+
+    await syncTeamUpdatesToLocal(teamConfig, localConfig, 'abc1234');
+
+    expect(await fse.readFile(path.join(localSkillDir, 'SKILL.md'), 'utf-8')).toBe('v1');
+  });
+
   it('should skip skill dirs that are already identical', async () => {
     const sameContent = 'identical skill content';
     const teamSkillDir = path.join(repoPath, 'skills', 'my-skill');
