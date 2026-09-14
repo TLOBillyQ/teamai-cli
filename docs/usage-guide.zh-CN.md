@@ -623,12 +623,16 @@ teamai status --all  # 列出 ~/.teamai/projects 下所有项目数据分区
 # 初始化（交互式创建 manifest）
 teamai roles init
 
-# 添加角色
+# 添加角色（--namespaces 同时设置 knowledge、skills 与 agents）
 teamai roles add devops --namespaces common,infra -d "基础设施团队"
+# ……或者分别指定 knowledge 与 skills
+teamai roles add artist --knowledge common,art --skills art-tools
 
-# 修改角色（增删 namespace、改描述）
+# 修改角色：每个选项只改自己点名的一侧，另一侧原样保留
+teamai roles update hai --add-knowledge infra
+teamai roles update hai --remove-skills legacy -d "新描述"
+# --add-namespaces / --remove-namespaces 同时作用于 knowledge、skills 与 agents
 teamai roles update hai --add-namespaces infra
-teamai roles update hai --remove-namespaces legacy -d "新描述"
 
 # 删除角色
 teamai roles remove devops
@@ -637,7 +641,7 @@ teamai roles remove devops
 teamai roles add test --namespaces common,test --dry-run
 ```
 
-`--namespaces` 列表会同时应用到 `knowledge`、`skills` 与 `agents`。以上命令会自动 push 分支并创建 MR，合并后对全团队生效。
+`--namespaces` 列表会同时应用到 `knowledge`、`skills` 与 `agents`。以上命令会自动 push 分支并创建 MR，合并后对全团队生效。修改是原地写回的，`manifest/roles.yaml` 中的注释和行内列表会保留；`--dry-run` 会分别列出每个将要变动的列表改动前后的值。
 
 **成员操作：**
 

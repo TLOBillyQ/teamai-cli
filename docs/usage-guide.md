@@ -651,12 +651,16 @@ Roles control which skills, namespaced rules and namespaced agents each member s
 # Initialize (interactively create the manifest)
 teamai roles init
 
-# Add a role
+# Add a role (--namespaces seeds knowledge, skills and agents alike)
 teamai roles add devops --namespaces common,infra -d "Infrastructure team"
+# ...or give knowledge and skills different namespaces
+teamai roles add artist --knowledge common,art --skills art-tools
 
-# Update a role (add/remove namespaces, change description)
+# Update a role: each flag touches only the side it names, the other side is left as-is
+teamai roles update hai --add-knowledge infra
+teamai roles update hai --remove-skills legacy -d "New description"
+# --add-namespaces / --remove-namespaces apply to knowledge, skills and agents alike
 teamai roles update hai --add-namespaces infra
-teamai roles update hai --remove-namespaces legacy -d "New description"
 
 # Remove a role
 teamai roles remove devops
@@ -665,7 +669,7 @@ teamai roles remove devops
 teamai roles add test --namespaces common,test --dry-run
 ```
 
-The `--namespaces` list is applied to `knowledge`, `skills` and `agents` alike. The commands above automatically push a branch and create an MR; the change takes effect team-wide once merged.
+The `--namespaces` list is applied to `knowledge`, `skills` and `agents` alike. The commands above automatically push a branch and create an MR; the change takes effect team-wide once merged. Edits are applied in place, so comments and inline lists in `manifest/roles.yaml` are preserved, and `--dry-run` shows the before/after value of every list that would change.
 
 **Member operations:**
 

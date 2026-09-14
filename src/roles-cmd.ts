@@ -1,8 +1,8 @@
 import path from 'node:path';
 import YAML from 'yaml';
 import { autoDetectInit, loadLocalConfig, saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadStateForScope, saveStateForScope } from './config.js';
-import { loadRolesManifest, saveRolesManifest, findRole, describeRoles, listRoleIds } from './roles.js';
-import type { RolesManifest, TeamRole } from './roles.js';
+import { loadRolesManifest, saveRolesManifest, findRole, describeRoles, listRoleIds, applyRoleResourceEdits, ROLE_RESOURCE_TYPES } from './roles.js';
+import type { RolesManifest, TeamRole, RoleResourceType, RoleResourceEdit } from './roles.js';
 import { pullRepo, pushRepoBranch, checkoutMaster, generateBranchName } from './utils/git.js';
 import { ensureDir, pathExists, writeFile, expandHome } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
@@ -14,10 +14,14 @@ import { askQuestion, askConfirmation } from './utils/prompt.js';
  * Parse a comma-separated string into a trimmed, non-empty string array.
  */
 function parseNamespaces(input: string): string[] {
-    return input
+    return [...new Set(input
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean);
+        .filter(Boolean))];
+}
+
+function describeResources(resources: TeamRole['resources']): string {
+    return ROLE_RESOURCE_TYPES.map((type) => `${type}: ${resources[type].join(', ')}`).join('; ');
 }
 
 // ─── Shared: pull latest + push branch + PR ──────────────
@@ -163,9 +167,9 @@ export async function rolesInit(options: GlobalOptions): Promise<void> {
             id,
             description,
             resources: {
-                knowledge: namespaces,
-                skills: namespaces,
-                agents: namespaces,
+                knowledge: [...namespaces],
+                skills: [...namespaces],
+                agents: [...namespaces],
             },
         });
 
@@ -211,7 +215,7 @@ export async function rolesInit(options: GlobalOptions): Promise<void> {
             teamConfig,
             localConfig: editConfig,
             commitMsg,
-            prDescription: `Initialize roles manifest:\n${roles.map((r) => `- ${r.id} (namespaces: ${r.resources.skills.join(', ')})`).join('\n')}`,
+            prDescription: `Initialize roles manifest:\n${roles.map((r) => `- ${r.id} (${describeResources(r.resources)})`).join('\n')}`,
         });
     });
 }
@@ -323,12 +327,25 @@ export async function rolesSet(
 
 export async function rolesAdd(
     roleId: string,
-    options: GlobalOptions & { namespaces: string; description?: string },
+    options: GlobalOptions & {
+        namespaces?: string;
+        knowledge?: string;
+        skills?: string;
+        description?: string;
+    },
 ): Promise<void> {
-    const namespaces = parseNamespaces(options.namespaces);
-    if (namespaces.length === 0) {
-        log.error('At least one namespace is required. Use --namespaces common,hai');
-        return;
+    // --namespaces seeds both sides; --knowledge / --skills override their own side.
+    const shared = options.namespaces !== undefined ? parseNamespaces(options.namespaces) : [];
+    const resources: TeamRole['resources'] = {
+        knowledge: options.knowledge !== undefined ? parseNamespaces(options.knowledge) : [...shared],
+        skills: options.skills !== undefined ? parseNamespaces(options.skills) : [...shared],
+        agents: [...shared],
+    };
+    for (const type of ['knowledge', 'skills'] as const) {
+        if (resources[type].length === 0) {
+            log.error(`At least one ${type} namespace is required. Use --${type} <ns>, or --namespaces <ns> to set both knowledge and skills.`);
+            return;
+        }
     }
 
     const { localConfig, teamConfig } = await autoDetectInit();
@@ -354,11 +371,7 @@ export async function rolesAdd(
         const newRole: TeamRole = {
             id: roleId,
             description: options.description ?? '',
-            resources: {
-                knowledge: namespaces,
-                skills: namespaces,
-                agents: namespaces,
-            },
+            resources,
         };
 
         const updatedManifest: RolesManifest = {
@@ -366,13 +379,14 @@ export async function rolesAdd(
             roles: [...manifest.roles, newRole],
         };
 
+        const summary = describeResources(resources);
         if (options.dryRun) {
-            log.info(`[dry-run] Would add role "${roleId}" with namespaces: ${namespaces.join(', ')}`);
+            log.info(`[dry-run] Would add role "${roleId}" (${summary})`);
             return;
         }
 
         await saveRolesManifest(repoPath, updatedManifest);
-        log.success(`Added role: ${roleId} (namespaces: ${namespaces.join(', ')})`);
+        log.success(`Added role: ${roleId} (${summary})`);
 
         const commitMsg = `[teamai] Add role "${roleId}"`;
         await pushManifestChange({
@@ -380,7 +394,7 @@ export async function rolesAdd(
             teamConfig,
             localConfig: editConfig,
             commitMsg,
-            prDescription: `Add role "${roleId}" with namespaces: ${namespaces.join(', ')}${options.description ? `\nDescription: ${options.description}` : ''}`,
+            prDescription: `Add role "${roleId}" (${summary})${options.description ? `\nDescription: ${options.description}` : ''}`,
         });
     });
 }
@@ -448,15 +462,32 @@ export async function rolesUpdate(
     options: GlobalOptions & {
         addNamespaces?: string;
         removeNamespaces?: string;
+        addKnowledge?: string;
+        removeKnowledge?: string;
+        addSkills?: string;
+        removeSkills?: string;
         description?: string;
     },
 ): Promise<void> {
-    const hasAddNs = options.addNamespaces !== undefined;
-    const hasRemoveNs = options.removeNamespaces !== undefined;
+    // --add/--remove-namespaces apply to every list; the per-type flags to one side only.
+    const perType: Record<RoleResourceType, { add?: string; remove?: string }> = {
+        knowledge: { add: options.addKnowledge, remove: options.removeKnowledge },
+        skills: { add: options.addSkills, remove: options.removeSkills },
+        agents: {},
+    };
+    const edits: Partial<Record<RoleResourceType, RoleResourceEdit>> = {};
+    for (const type of ROLE_RESOURCE_TYPES) {
+        const add = [options.addNamespaces, perType[type].add]
+            .flatMap((v) => (v !== undefined ? parseNamespaces(v) : []));
+        const remove = [options.removeNamespaces, perType[type].remove]
+            .flatMap((v) => (v !== undefined ? parseNamespaces(v) : []));
+        if (add.length > 0 || remove.length > 0) edits[type] = { add, remove };
+    }
+    const editedTypes = ROLE_RESOURCE_TYPES.filter((type) => edits[type] !== undefined);
     const hasDesc = options.description !== undefined;
 
-    if (!hasAddNs && !hasRemoveNs && !hasDesc) {
-        log.error('Nothing to update. Use --add-namespaces, --remove-namespaces, or --description.');
+    if (editedTypes.length === 0 && !hasDesc) {
+        log.error('Nothing to update. Use --add-knowledge/--remove-knowledge, --add-skills/--remove-skills, --add-namespaces/--remove-namespaces (both sides), or --description.');
         return;
     }
 
@@ -480,38 +511,20 @@ export async function rolesUpdate(
             return;
         }
 
-        // Build updated namespaces (immutable)
-        let updatedNamespaces = [...existingRole.resources.skills];
-
-        if (hasAddNs) {
-            const toAdd = parseNamespaces(options.addNamespaces!);
-            const existing = new Set(updatedNamespaces);
-            for (const ns of toAdd) {
-                if (!existing.has(ns)) {
-                    updatedNamespaces.push(ns);
-                    existing.add(ns);
-                }
+        // Only the edited resource types change; the other side keeps its list as-is.
+        const edited = applyRoleResourceEdits(existingRole, edits);
+        for (const type of editedTypes) {
+            // agents may legitimately be empty (root-level agents only).
+            if (type === 'agents') continue;
+            if (edited.resources[type].length === 0) {
+                log.error(`Cannot remove all ${type} namespaces. A role must keep at least one ${type} namespace.`);
+                return;
             }
         }
 
-        if (hasRemoveNs) {
-            const toRemove = new Set(parseNamespaces(options.removeNamespaces!));
-            updatedNamespaces = updatedNamespaces.filter((ns) => !toRemove.has(ns));
-        }
-
-        if (updatedNamespaces.length === 0) {
-            log.error('Cannot remove all namespaces. A role must have at least one namespace.');
-            return;
-        }
-
         const updatedRole: TeamRole = {
-            ...existingRole,
+            ...edited,
             description: hasDesc ? options.description! : existingRole.description,
-            resources: {
-                knowledge: updatedNamespaces,
-                skills: updatedNamespaces,
-                agents: updatedNamespaces,
-            },
         };
 
         const updatedManifest: RolesManifest = {
@@ -519,20 +532,28 @@ export async function rolesUpdate(
             roles: manifest.roles.map((r) => (r.id === roleId ? updatedRole : r)),
         };
 
+        // Report only the sides that actually change (e.g. --remove-namespaces of a
+        // namespace present on one side only is a no-op for the other side).
+        const changedTypes = editedTypes.filter((type) =>
+            existingRole.resources[type].join(' ') !== updatedRole.resources[type].join(' '));
+        const diffLines = changedTypes.map((type) =>
+            `${type}: ${existingRole.resources[type].join(', ')} -> ${updatedRole.resources[type].join(', ')}`);
+        if (hasDesc && options.description !== existingRole.description) {
+            diffLines.push(`description: ${existingRole.description} -> ${options.description}`);
+        }
+        if (diffLines.length === 0) {
+            log.info(`Role "${roleId}" already matches the requested state. Nothing to change.`);
+            return;
+        }
+
         if (options.dryRun) {
             log.info(`[dry-run] Would update role "${roleId}":`);
-            log.info(`  namespaces: ${updatedNamespaces.join(', ')}`);
-            if (hasDesc) log.info(`  description: ${options.description}`);
+            for (const line of diffLines) log.info(`  ${line}`);
             return;
         }
 
         await saveRolesManifest(repoPath, updatedManifest);
-        log.success(`Updated role: ${roleId} (namespaces: ${updatedNamespaces.join(', ')})`);
-
-        const changes: string[] = [];
-        if (hasAddNs) changes.push(`added namespaces: ${options.addNamespaces}`);
-        if (hasRemoveNs) changes.push(`removed namespaces: ${options.removeNamespaces}`);
-        if (hasDesc) changes.push(`description: ${options.description}`);
+        log.success(`Updated role: ${roleId} (${describeResources(updatedRole.resources)})`);
 
         const commitMsg = `[teamai] Update role "${roleId}"`;
         await pushManifestChange({
@@ -540,7 +561,7 @@ export async function rolesUpdate(
             teamConfig,
             localConfig: editConfig,
             commitMsg,
-            prDescription: `Update role "${roleId}": ${changes.join(', ')}`,
+            prDescription: `Update role "${roleId}":\n${diffLines.map((line) => `- ${line}`).join('\n')}`,
         });
     });
 }
