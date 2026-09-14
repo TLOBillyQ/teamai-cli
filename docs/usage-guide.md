@@ -2346,13 +2346,23 @@ Team hooks still come from the team's `hooks/hooks.yaml`: edit that source in th
 - **MCP (Pi 0.99.0+).** Supports stdio and streamable HTTP; SSE is skipped. User configuration goes to `~/.pi/agent/mcp.json`, project configuration to `.pi/mcp.json`; Pi loads project configuration only after trusting the project. The native `codemode` default is retained, without forcing direct exposure; timeout values in `mcp.yaml` are converted from milliseconds to seconds. Local exposure/enabled changes to managed entries survive unchanged team definitions but are replaced when the team definition changes; doctor compares complete entries and reports these local differences. An extension taking over `/mcp` can disable built-in MCP; remove that extension to use the built-in support.
 - **Subagents.** TeamAI custom subagent files are not supported.
 
+### Codex
+
+Codex reads user instructions from `~/.codex/AGENTS.md` and project instructions from native `AGENTS.md` files. Its `.codex/rules/` directory holds Starlark `.rules` exec policies, so Markdown instructions copied there are not loaded.
+
+- **User scope:** team rules, culture, shared instructions and recall use managed blocks in the tool's own user `AGENTS.md`, preserving personal content.
+- **Project scope:** TeamAI delivers member-specific rules and instructions through session hooks, including fresh sessions and Codex subagents. It does not write Codex team instructions into the shared project `AGENTS.md`. Native project instructions remain readable; existing TeamAI blocks are retired only when no active tool still needs them.
+- Unchanged TeamAI-owned legacy Markdown rule copies are reclaimed; edited or unowned files and native `.rules` policies are preserved.
+
+ZCode and DSH retain this fork's shared project inline rules block. Codex uses its own hook channel; uninstalling Codex preserves blocks still used by the installed ZCode or DSH.
+
 ### Kimi Code CLI
 
 Kimi Code CLI is a built-in target (`--agent kimi`), detected from `~/.kimi-code` like the other tools. Its project-level layout is scanned natively, but it has **no rules directory** and does not expand `@file` references in `AGENTS.md`, so teamai adapts:
 
 - **Skills** land in `.kimi-code/skills/` (Kimi scans it directly, alongside `.agents/skills/`).
 - **Subagents** are rendered into `.kimi-code/agents/*.md` using the [current Kimi Markdown format](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/agents): `name`, `description` and a YAML-list `tools` allowlist with case-sensitive names such as `Bash`, `Read`, `Grep`, and `Glob` (`Task` maps to `Agent`). Known legacy Python tool ids from previous TeamAI output are converted to current names on render and reverse sync; unknown names and MCP patterns such as `mcp__jira__*` remain unchanged. Explicit `tools: []` still disables all tools. The same conversion applies to `tools` and `disallowedTools` overrides in `tool_extras.kimi`. After upgrading TeamAI, run `teamai pull --force` to refresh existing built-in and team agents; repeat pulls retain the corrected names. This target supports current Markdown agents, not the legacy Python CLI's separate `version`/`agent` YAML format. The common `model` field is not emitted; Kimi-only fields (`whenToUse`, `disallowedTools`, `subagents`, `override`) round-trip through `tool_extras.kimi`.
-- **Rules** are **inlined** into a teamai-managed block (`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`) of `.kimi-code/AGENTS.md`, the one file Kimi injects into its system prompt. Rules appear in the order of their path under the team repo's `rules/` directory (sorted by name, each subdirectory in place), so every machine generates the same block regardless of filesystem. Rule frontmatter (`paths:` …) is stripped, so a path-scoped rule applies to every task in Kimi; your own content outside the block is preserved; the block is removed when the team's last rule goes away. Nothing is copied into `.kimi-code/rules/` because Kimi would never read it.
+- **Rules** are **inlined** into a teamai-managed block (`<!-- [teamai:team-rules:start] -->` … `<!-- [teamai:team-rules:end] -->`) of `.kimi-code/AGENTS.md`, the one file Kimi injects into its system prompt. Rules appear in the order of their path under the team repo's `rules/` directory (sorted by name, each subdirectory in place), so every machine generates the same block regardless of filesystem. Rule frontmatter (`paths:` …) is stripped, so a path-scoped rule applies to every task in Kimi; your own content outside the block is preserved; the block is removed when the team's last rule goes away. Nothing is copied into `.kimi-code/rules/` because Kimi would never read it.
 - **Culture, shared instructions and the recall block** are injected into the same `.kimi-code/AGENTS.md` (the recall block and the built-in `teamai-recall` subagent only when recall is enabled, see `teamai recall status`). All of this only happens when `.kimi-code/` exists for the scope (or you enabled `kimi` explicitly) — teamai never creates it for someone who doesn't use Kimi.
 - **Hooks** live in the user-level `~/.kimi-code/config.toml` (see the hooks note above). If that directory does not exist yet, pull skips them (with a `Kimi Code hooks skipped: ...` warning when kimi is enabled) — run Kimi Code once, then pull again. `teamai doctor` checks that `config.toml` carries the teamai entries.
 
@@ -2384,7 +2394,9 @@ ZCode is available as a built-in target. Skills deploy to `.zcode/skills/` (ZCod
 - On Windows, hook entries launch through a hidden **wscript VBS launcher** (`wscript.exe <teamai-hook-dispatch.vbs> <dispatch tail>`): wscript is a GUI-subsystem binary, so hook runs never flash a console window, and the launcher spools STDIN to a temp file so the payload reaches `hook-dispatch`. Timeouts are network-scale per event (180s session start, 60s stop / prompt submit, 30s post-tool-use) so a session-start dispatch carrying a repo pull is not killed mid-flight. Payloads containing multi-byte text may degrade at the launcher's ANSI-codepage spool step — identity fields are salvaged so degraded dispatches stay linked to the session; uninstall removes both the entries and the script.
 - On POSIX, entries are plain `bash -lc <dispatch>` argv vectors and the launcher is not written; on both platforms the command tail is stored verbatim as the entry's last argv element, which is what managed-entry detection and the managed-hooks manifest match against.
 
-These paths are verified against the ZCode desktop app: profiles created in its Subagents settings page land in `~/.zcode/agents/*.md`, and files placed there (e.g. by TeamAI) show up in the page's installed list. MCP servers deploy to `~/.agents/mcp.json` (user scope, Claude `mcpServers` shape — the same file ZCode's own MCP settings page reads). Project scope is not wired: ZCode stores workspace MCP under a different key (`mcp.servers` inside `.zcode/config.json`), which the Claude writer cannot emit. ZCode reads no rules directory: in user scope the team rules are a block in `~/.zcode/AGENTS.md`, which ZCode reads as its user context, without path scoping. In a project, teamai's `SessionStart` hook in `~/.zcode/cli/config.json` adds the project's team rules to each new session (ZCode runs no project-level hooks). ZCode drops that text when it compacts a session, so the rules come back in the next session.
+These paths are verified against the ZCode desktop app: profiles created in its Subagents settings page land in `~/.zcode/agents/*.md`, and files placed there (e.g. by TeamAI) show up in the page's installed list. MCP servers deploy to `~/.agents/mcp.json` (user scope, Claude `mcpServers` shape — the same file ZCode's own MCP settings page reads). Project scope is not wired: ZCode stores workspace MCP under a different key (`mcp.servers` inside `.zcode/config.json`), which the Claude writer cannot emit.
+
+ZCode reads no rules directory. This fork inlines team rules into a managed block in `~/.zcode/AGENTS.md` in user scope and the workspace-root `AGENTS.md` in project scope. Rule frontmatter is stripped, so path-scoped rules apply to every task. Your content outside the block is preserved. Project delivery requires `.zcode/`; an existing `AGENTS.md` alone does not count as an installed tool. DSH shares the project rules block, which uninstall preserves while either installed tool still uses it. Other tools that natively read `AGENTS.md` also see these rules. Codex uses session hooks for its project rules. Culture and shared instructions retain each tool's configured delivery; recall in the shared project file tells tools to run `teamai recall` directly, without requiring a recall subagent.
 
 ### Oh My Pi
 
@@ -2396,9 +2408,11 @@ Rules are written in OMP's own frontmatter, in `.omp/rules/` and `~/.omp/agent/r
 
 DeepSeek Harness (`dsh`) is supported for TeamAI skills and shared resources. DSH's official Claude-hook bridge is a profile plugin rather than a settings-file hook surface, so when dsh's home (`$DSH_HOME`, `~/.dsh/` when it is unset) exists, `teamai init`, `teamai pull`, or `teamai hooks inject` writes a Claude-compatible hook config and a Cordis patch under `~/.teamai/dsh/`.
 
-dsh reads no rules directory. In user scope the team rules are a block in `$DSH_HOME/AGENTS.md` (`~/.dsh/AGENTS.md` when `DSH_HOME` is unset), which dsh puts in its first request, without path scoping. As for hooks, teamai writes it only when that home exists. Skills still go to `~/.dsh/skills/`, and only while `~/.dsh/` exists, whatever `DSH_HOME` says. In a project, teamai's session-start hook adds the project's team rules, once dsh runs with the patch below. dsh runs that hook detached, so the first request can miss them, and drops them when it compacts a session.
+dsh reads no rules directory. In user scope the team rules are a block in `$DSH_HOME/AGENTS.md` (`~/.dsh/AGENTS.md` when `DSH_HOME` is unset), which dsh puts in its first request, without path scoping. As for hooks, teamai writes it only when that home exists. Skills still go to `~/.dsh/skills/`, and only while `~/.dsh/` exists, whatever `DSH_HOME` says. In this fork, project rules are inlined into the workspace-root `AGENTS.md` rather than returned by the session-start hook.
 
 TeamAI prints the exact absolute patch path. Add that `--patch` flag to the command that starts your DSH profile, for example `dsh tui --patch "<printed-path>"`. This is a one-time launcher opt-in; `teamai hooks remove` and `teamai uninstall` remove the TeamAI patch while preserving other hook entries in the generated config.
+
+Enable DeepSeek Harness explicitly with `--agent dsh`. In project scope, skills go to `.dsh/skills/`, and team rule bodies are inlined into the workspace-root `AGENTS.md` between the `teamai:team-rules` markers; no `.dsh/rules/` directory is created. Frontmatter is stripped, so path-scoped rules apply to all tasks. Personal content outside managed blocks is preserved. Injection is gated on the DSH install root; an excluded DSH receives no files.
 
 ### JoyCode
 
@@ -2811,7 +2825,7 @@ Keys in `teamai.yaml` this CLI version does not recognize are ignored, so an old
 
 #### `toolPaths`
 
-`toolPaths` maps each tool (`claude`, `codex`, `kimi`, …) to the paths TeamAI installs into: `skills`, `rules`, `settings`, `claudemd`, `agents`, `mcp`, `mcpProject`, and `userScope` (user-scope overrides for `skills` / `rules` / `agents`). TeamAI ships a built-in table for every supported tool, so most team repos omit `toolPaths` entirely.
+`toolPaths` maps each tool (`claude`, `codex`, `kimi`, …) to the paths TeamAI installs into: `skills`, `rules`, `settings`, `claudemd`, `agents`, `mcp`, `mcpProject`, and `userScope` (user-scope overrides for `skills` / `rules` / `agents` / `claudemd`). TeamAI ships a built-in table for every supported tool, so most team repos omit `toolPaths` entirely.
 
 When a team repo sets `toolPaths`, it is merged over the built-in table per tool and per field:
 
@@ -2825,8 +2839,8 @@ toolPaths:
   claude:
     skills: .claude/custom-skills   # only claude's skills path changes; all other tools and fields keep their defaults
   kimi: false                       # stop installing into Kimi
-  codex:
-    rules: false                    # keep codex, but drop its rules path
+  cursor:
+    rules: false                    # keep cursor, but drop its rules path
 ```
 
 Only list what you change. A full copy of the table pinned in the team repo still works, but it keeps the old values of every field it lists, so later changes to those defaults won't reach your team. Tools and fields added after you copied the table are filled in automatically.
@@ -2882,6 +2896,25 @@ Notify external endpoints when team events happen. Each endpoint declares a `url
 **Payload.** Only whitelisted, non-sensitive fields are sent: `skillName` for `skill-use`, `sessionId` for session events; `push`/`pull` carry the event and metadata only. Raw tool input and tool output are **never** forwarded, and the whole body is passed through teamai's secret redactor before it leaves the machine.
 
 **Signature.** When `secret` is set, each request carries `X-TeamAI-Signature: sha256=<hmac>`, an HMAC-SHA256 computed over the exact request body — so a receiver can verify authenticity. `teamai webhook list` and `teamai webhook test` inspect and exercise configured endpoints; `teamai webhook test --dry-run` previews how many endpoints would receive a request without sending one.
+
+### Managed block markers
+
+teamai writes into a few files you also own (tool instruction files and your shell profile) and always keeps its content between a fixed start/end marker pair. The block is regenerated on every sync, so don't edit inside it; content outside the markers is left untouched, and `teamai uninstall` removes only the blocks. Acceptance or health-check scripts should match these exact strings.
+
+Paths are relative to the project root in project scope and to your home directory in user scope. A tool's *instructions file* is its `claudemd` path in `toolPaths`: `.claude/CLAUDE.md` (`claude`), `.claude-internal/CLAUDE.md` (`claude-internal`), `.tclaude/CLAUDE.md` (`tclaude`), `.codebuddy/CODEBUDDY.md` (`codebuddy`), `.kimi-code/AGENTS.md` (`kimi`), `.zcode/AGENTS.md` (`zcode`, user scope), `.codex/AGENTS.md` (`codex`, user scope), `.openclaw/workspace/AGENTS.md` (`openclaw`), `AGENTS.md` (`hermes`, `workbuddy`, `dsh`, and `zcode` / `codex` in project scope). Tools without one (such as `cursor`, `opencode`, `qoder`, `joycode`) get no instructions-file blocks. A tool only gets these blocks once its own directory exists (for example `.claude/`, `.kimi-code/`, `.zcode/` or `.codex/`). The exception is `hermes`, which isn't gated, so the culture and shared-instructions blocks are always written to the root `AGENTS.md`.
+
+| Marker (start / end) | Written to | When | Constant (`src/types.ts`) |
+| --- | --- | --- | --- |
+| `<!-- [teamai:team-rules:start] -->` / `<!-- [teamai:team-rules:end] -->` | Kimi `.kimi-code/AGENTS.md`; ZCode user `~/.zcode/AGENTS.md`; Codex user `~/.codex/AGENTS.md`; DSH user `$DSH_HOME/AGENTS.md`; installed ZCode/DSH project `AGENTS.md`; Hermes user `$HERMES_HOME/SOUL.md`. Codex project rules use session hooks | `pull` inlines team rule bodies without path scoping; removes the block when no rules remain | `TEAMAI_TEAM_RULES_START` / `TEAMAI_TEAM_RULES_END` |
+| `<!-- [teamai:culture:start] -->` / `<!-- [teamai:culture:end] -->` | Each tool's instructions file | `pull`, when the team repo has `culture.md` (see [Team Culture](#team-culture)) | `TEAMAI_CULTURE_START` / `TEAMAI_CULTURE_END` |
+| `<!-- [teamai:claudemd:start] -->` / `<!-- [teamai:claudemd:end] -->` | Each tool's instructions file | `pull`, when the team repo has shared instructions under `claudemd/` for your active namespaces | `TEAMAI_CLAUDEMD_START` / `TEAMAI_CLAUDEMD_END` |
+| `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | Instructions file of tools that also have subagents: `claude`, `claude-internal`, `tclaude`, `codebuddy`, `kimi`, `zcode`, `codex` (`zcode` and `codex` in user scope only: the project-root `AGENTS.md` is shared with tools that have no recall subagent) | `pull` and `teamai recall enable`, while recall is enabled (off by default; turn it on with `sharing.recall.enabled` or `teamai recall enable`); `teamai recall disable` removes it. Tells the main conversation to call the `teamai-recall` subagent | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
+| `# [teamai:env:start]` / `# [teamai:env:end]` | Shell profile: `sharing.env.shellProfilePath` if set, otherwise `~/.zshrc` when `$SHELL` is zsh, else `~/.bashrc` | `pull`, when the team repo defines env variables and `sharing.env.injectShellProfile` is not `false`. The block only sources teamai's `env.sh` | `TEAMAI_ENV_START` / `TEAMAI_ENV_END` |
+| `--- [teamai:recall:start] ---` / `--- [teamai:recall:end] ---` | **Never written to a file.** Printed to stdout by `teamai recall` | Every `teamai recall` run. The start line is followed by the result count, e.g. `--- [teamai:recall:start] --- (3 results)` | `TEAMAI_RECALL_OUTPUT_START` / `TEAMAI_RECALL_OUTPUT_END` |
+
+> **`recall` vs `recall-rules`:** the two differ by one suffix but are unrelated. To check that recall is installed for a tool, look for `<!-- [teamai:recall-rules:start] -->` in its instructions file. `[teamai:recall:start]` only appears in `teamai recall` output (and in agent transcripts that captured that output), so grepping `CLAUDE.md` or `AGENTS.md` for it always fails.
+
+If only one marker of a pair is left in a file (for example after a hand edit), the next sync can't find the block and appends a fresh one instead of replacing it. Delete both markers or neither.
 
 ---
 
@@ -3062,7 +3095,7 @@ What gets removed:
 
 `--agent <tool>` removes only that tool's teamai resources (hooks, team instruction blocks, skills, rules, team-synced custom agents, and built-in agents). The tool name is a key of `toolPaths` (e.g. `claude`, `codex`, `codebuddy`) and is matched case-insensitively. An unknown tool name aborts without deleting anything, lists the available tools, and exits with a non-zero status.
 
-An instructions file several tools map is cleaned per block: a teamai block stays while a remaining tool on that file still writes it. The common case is `.codebuddy/rules/teamai-context.md`, which CodeBuddy and WorkBuddy share: `--agent workbuddy` keeps it while CodeBuddy is installed. A file an earlier release wrote the blocks to, such as the project `AGENTS.md`, is read by no tool now, so its teamai blocks go and your own text stays. A file teamai created goes with its last block; an instructions file you had before stays, even an empty one. A configured `claudemd` remains a member file even when its basename is `teamai-context.md`.
+An instructions file several tools map is cleaned per block: a teamai block stays while a remaining installed tool on that file still uses it. CodeBuddy and WorkBuddy share `.codebuddy/rules/teamai-context.md`; ZCode and DSH share the project `AGENTS.md` rules block. Blocks in retired files are removed when no remaining tool uses them, preserving your own text. A file teamai created goes with its last block; an instructions file you had before stays, even an empty one. A configured `claudemd` remains a member file even when its basename is `teamai-context.md`.
 
 Shared resources (the env block, docs directory, and `~/.teamai/`) are removed **only when the target itself has teamai resources AND is the last tool still using teamai** — otherwise they are kept for the remaining tools. Targeting a tool with no local resources leaves shared resources in place, even if it is the only tool. Project uninstall still records the exclusion for Pi, Oh My Pi, Hermes and the Codex family, whose instruction channels are global.
 

@@ -211,7 +211,7 @@ export const DEFAULT_TOOL_PATHS: Readonly<Record<string, ToolPaths>> = {
   // ~/.agents/mcp.json; project scope writes `mcp.servers` inside
   // .zcode/config.json (a different key), which the Claude writer cannot
   // emit — so no mcpProject. ZCode has no user-level rules dir convention.
-  zcode: { skills: '.zcode/skills', agents: '.zcode/agents', settings: '.zcode/cli/config.json', mcp: '.agents/mcp.json' },
+  zcode: { skills: '.zcode/skills', agents: '.zcode/agents', settings: '.zcode/cli/config.json', mcp: '.agents/mcp.json', claudemd: 'AGENTS.md', userScope: { claudemd: '.zcode/AGENTS.md' } },
   // Oh My Pi (OMP): the config root is ~/.omp on every platform (no %APPDATA%
   // on Windows); user-scope resources live in the agent dir ~/.omp/agent/, a
   // different prefix from the project <root>/.omp/, hence userScope. Rules are
@@ -269,7 +269,7 @@ export const DEFAULT_TOOL_PATHS: Readonly<Record<string, ToolPaths>> = {
   // DeepSeek Harness: skills synced to ~/.dsh/skills, which its skill-filesystem
   // provider scans as user-dsh root (rank 400). dsh discovers both directory
   // bundles (<name>/SKILL.md) and flat Markdown files there natively.
-  dsh: { skills: '.dsh/skills' },
+  dsh: { skills: '.dsh/skills', claudemd: 'AGENTS.md' },
   // WorkBuddy shares CodeBuddy's project rules but keeps its own user rules (#946).
   workbuddy: {
     skills: '.workbuddy/skills',

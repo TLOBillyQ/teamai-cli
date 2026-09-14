@@ -1797,8 +1797,8 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
     await handler.pullAllRules(teamConfig, localConfig);
 
     const content = await fse.readFile(agentsMd(), 'utf8');
-    expect(content).toContain('<!-- [teamai:rules:start] -->');
-    expect(content).toContain('<!-- [teamai:rules:end] -->');
+    expect(content).toContain('<!-- [teamai:team-rules:start] -->');
+    expect(content).toContain('<!-- [teamai:team-rules:end] -->');
     expect(content).toContain('# Coding\nUse tabs.');
     expect(content).toContain('Always review.');
     expect(content).not.toContain('paths:');
@@ -1818,7 +1818,7 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
     expect(content.startsWith('# Mine\nkeep me')).toBe(true);
     expect(content).toContain('rule A v2');
     expect(content).not.toContain('rule A\n');
-    expect(content.match(/teamai:rules:start/g)).toHaveLength(1);
+    expect(content.match(/teamai:team-rules:start/g)).toHaveLength(1);
   });
 
   it('removes the block when the team has no rules left, keeping user content', async () => {
@@ -1832,7 +1832,7 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
 
     const content = await fse.readFile(agentsMd(), 'utf8');
     expect(content.trim()).toBe('# Mine');
-    expect(content).not.toContain('teamai:rules');
+    expect(content).not.toContain('teamai:team-rules');
   });
 
   it('does not create .kimi-code/AGENTS.md when Kimi is not installed', async () => {

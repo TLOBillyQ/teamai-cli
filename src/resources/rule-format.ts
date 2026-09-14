@@ -73,7 +73,7 @@ const RULE_FORMATS: Readonly<Record<string, RuleFormat>> = {
  * team rules: the Codex family (#938), ZCode, whose CLI runs only user-level
  * hooks, and DeepSeek Harness through teamai's `--patch` (#946).
  */
-const SESSION_HOOK_RULE_TOOLS = new Set(['codex', 'codex-internal', 'tcodex', 'zcode', 'dsh']);
+const SESSION_HOOK_RULE_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
 
 /**
  * The tools whose teamai extension adds a project's team rules to each run's
@@ -191,8 +191,8 @@ export function usesCopilotInstructions(tool: string): boolean {
 
 /**
  * True when the tool has no rules format of its own, so in a project its
- * session-start hook adds the team rules (the Codex family, #938; ZCode and
- * DeepSeek Harness, #946). Pull writes no rule file for it.
+ * session-start hook adds the team rules (the Codex family, #938).
+ * Pull writes no rule file for it.
  */
 export function getsRulesFromSessionHook(tool: string): boolean {
   return SESSION_HOOK_RULE_TOOLS.has(tool);
@@ -344,7 +344,7 @@ export const LEGACY_RULE_DIRS: readonly LegacyRuleDir[] = [
  * tool's `claudemd` file instead of copying files (which the tool would
  * silently ignore).
  */
-const INLINE_INSTRUCTION_RULE_TOOLS = new Set(['kimi']);
+const INLINE_INSTRUCTION_RULE_TOOLS = new Set(['kimi', 'zcode', 'dsh']);
 
 /** True when the tool receives team rules inlined into its instructions file. */
 export function inlinesRulesIntoInstructions(tool: string): boolean {

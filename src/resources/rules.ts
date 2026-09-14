@@ -719,11 +719,6 @@ export class RulesHandler extends ResourceHandler {
     // early return so removing the last rule also removes the glob.
     await this.activateOpencodeInstructions(teamConfig, localConfig, rules);
 
-    // Kimi Code CLI has no rules directory: inline the rule bodies into a
-    // managed block of its AGENTS.md. Also before the early return so the block
-    // disappears when the team's last rule is removed.
-    await this.inlineRulesIntoInstructionFiles(teamConfig, localConfig, rules);
-
     // Empty set = no team rule reaches this directory right now. We deliberately do
     // NOT run the aggressive stale-file cleanup below in that case, because it would
     // treat a user's own personal rule files as stale and delete them. Explicit team
@@ -901,6 +896,7 @@ export class RulesHandler extends ResourceHandler {
     localConfig: LocalConfig,
     rules: ResourceItem[],
   ): Promise<void> {
+    if (localConfig.scope !== 'project') return;
     const baseDir = resolveBaseDir(localConfig);
     let bodies: string[] | null = null;
 
@@ -908,7 +904,8 @@ export class RulesHandler extends ResourceHandler {
       if (!inlinesRulesIntoInstructions(tool)) continue;
       if (isAgentExcluded(localConfig, tool)) continue;
       if (!toolPath.claudemd) continue;
-      if (!await ResourceHandler.isToolInstalled(toolPath.claudemd, baseDir)) continue;
+      const { isInstructionToolInstalled } = await import('../instruction-targets.js');
+      if (!await isInstructionToolInstalled(tool, toolPath, localConfig)) continue;
 
       if (bodies === null) {
         bodies = [];
@@ -933,7 +930,8 @@ export class RulesHandler extends ResourceHandler {
       const filePath = path.join(baseDir, toolPath.claudemd);
       try {
         const existing = (await readFileSafe(filePath)) ?? '';
-        const merged = mergeManagedBlock(existing, TEAMAI_RULES_START, TEAMAI_RULES_END, blockBody);
+        const cleaned = mergeManagedBlock(existing, TEAMAI_RULES_START, TEAMAI_RULES_END, '');
+        const merged = mergeManagedBlock(cleaned, TEAMAI_TEAM_RULES_START, TEAMAI_TEAM_RULES_END, blockBody);
         if (merged === existing.trim()) continue;
         if (merged === '') {
           if (await pathExists(filePath)) await remove(filePath);
@@ -984,6 +982,7 @@ export class RulesHandler extends ResourceHandler {
     rules: ResourceItem[],
   ): Promise<void> {
     if (localConfig.scope !== 'user') {
+      await this.inlineRulesIntoInstructionFiles(teamConfig, localConfig, rules);
       await this.removeStaleProjectSoulRules(localConfig);
       return;
     }

@@ -123,6 +123,7 @@ const codebuddyProjectRule = (paths: ToolPaths): string | undefined =>
 
 // One line per tool, so a change to one tool's target edits one line.
 const USER_TARGETS: Readonly<Record<string, TargetEntry>> = {
+  kimi: { file: configured, teamRules: { label: 'Kimi AGENTS.md' }, retired: [] },
   claude: { file: configured, retired: [] },
   // Cursor CLI reads ~/.cursor/rules when the session starts under $HOME.
   cursor,
@@ -141,7 +142,7 @@ const USER_TARGETS: Readonly<Record<string, TargetEntry>> = {
   'codex-internal': codexUser,
   tcodex: codexUser,
   // ZCode reads ~/.zcode/AGENTS.md as its user context; teamai writes it only the team rules.
-  zcode: { file: () => undefined, teamRules: { label: 'ZCode AGENTS.md', file: () => '.zcode/AGENTS.md' }, retired: [] },
+  zcode: { file: configured, teamRules: { label: 'ZCode AGENTS.md', file: () => '.zcode/AGENTS.md' }, retired: [] },
   dsh: { file: () => undefined, teamRules: { label: 'DeepSeek Harness AGENTS.md', file: dshAgentsMd }, retired: [] },
   // JoyCode reads its user rules from one plain text file.
   joycode: { file: () => undefined, teamRules: { label: 'JoyCode rules.txt', file: () => '.joycode/rules.txt' }, retired: [] },
@@ -157,6 +158,10 @@ const USER_TARGETS: Readonly<Record<string, TargetEntry>> = {
 };
 
 const PROJECT_TARGETS: Readonly<Record<string, TargetEntry>> = {
+  kimi: { file: configured, retired: [] },
+  // These fork targets keep inline team rules in the shared native file.
+  zcode: { file: configured, retired: [] },
+  dsh: { file: configured, retired: [] },
   // Claude loads every unscoped .claude/rules file from the root and any
   // subdirectory, and still reads AGENTS.md and an authored CLAUDE.md as it
   // chose to. CLAUDE.local.md would stop the native AGENTS.md load (#945).
@@ -604,7 +609,9 @@ export async function resolveInstructionTargets(
     inUse.add(file);
     const target = targets.get(file) ?? await instructionTargetAt(tool, file, localConfig.scope, paths);
     // The subagent block only where every tool reading the file has the subagent.
-    target.recall = Boolean(paths.agents) && (target.tools.length === 0 || target.recall);
+    const sharedProjectFile = localConfig.scope === 'project' && localConfig.projectRoot
+      && file === path.join(localConfig.projectRoot, 'AGENTS.md');
+    target.recall = !sharedProjectFile && Boolean(paths.agents) && (target.tools.length === 0 || target.recall);
     target.tools.push(tool);
     targets.set(file, target);
   }

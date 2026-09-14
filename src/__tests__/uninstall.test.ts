@@ -54,7 +54,7 @@ import { deployBuiltinRules } from '../builtin-rules.js';
 import { loadStateForScope, saveStateForScope } from '../config.js';
 import { checkoutKey } from '../pull.js';
 import { fileHash } from '../utils/fs.js';
-import { TeamaiConfigSchema, getDataHome, managedMcpManifestKey, managedMcpManifestPath } from '../types.js';
+import { TeamaiConfigSchema, DEFAULT_TOOL_PATHS, getDataHome, managedMcpManifestKey, managedMcpManifestPath } from '../types.js';
 import { ModelProfileSchema, resolveProfile } from '../models/profile.js';
 import { switchModelProfile } from '../models/switch.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
@@ -906,6 +906,101 @@ describe('uninstall', () => {
 
     expect(await fse.pathExists(projectPiHook)).toBe(false);
     expect(await fse.pathExists(sharedInstructions)).toBe(false);
+  });
+  it('removes only the managed blocks from ~/.zcode/AGENTS.md (user scope)', async () => {
+    const { homeDir, repoPath, teamaiHome } = await setupFixture(tmpDir);
+    vi.stubEnv('HOME', homeDir);
+    vi.stubEnv('SHELL', '/bin/zsh');
+
+    const zcodeAgentsMd = path.join(homeDir, '.zcode', 'AGENTS.md');
+    await fse.ensureDir(path.join(homeDir, '.zcode'));
+    await fse.writeFile(zcodeAgentsMd, [
+      '# My ZCode notes',
+      '',
+      TEAMAI_RULES_START,
+      '<!-- DO NOT EDIT -->',
+      '# Team Rule',
+      TEAMAI_RULES_END,
+      '',
+      '## Keep this too',
+      '',
+    ].join('\n'));
+
+    const teamConfig = makeTeamConfig({
+      toolPaths: { zcode: DEFAULT_TOOL_PATHS.zcode },
+      sharing: {
+        skills: {},
+        rules: { enforced: [] },
+        docs: { localDir: `${teamaiHome}/docs` },
+        env: { injectShellProfile: true },
+      },
+    });
+    mockAutoDetectInit.mockResolvedValue({ localConfig: makeLocalConfig(homeDir, repoPath), teamConfig });
+
+    await uninstall({ force: true });
+
+    const after = await fse.readFile(zcodeAgentsMd, 'utf-8');
+    expect(after).toContain('# My ZCode notes');
+    expect(after).toContain('## Keep this too');
+    expect(after).not.toContain(TEAMAI_RULES_START);
+    expect(after).not.toContain('# Team Rule');
+  });
+
+  describe.each(['zcode', 'dsh'] as const)('project-root AGENTS.md shared by %s and WorkBuddy', (inlineTool) => {
+    const sharedAgentsMd = [
+      '# Project notes',
+      '',
+      TEAMAI_CULTURE_START,
+      'culture',
+      TEAMAI_CULTURE_END,
+      '',
+      TEAMAI_CLAUDEMD_START,
+      'shared instructions',
+      TEAMAI_CLAUDEMD_END,
+      '',
+      TEAMAI_RULES_START,
+      '# Team Rule',
+      TEAMAI_RULES_END,
+      '',
+    ].join('\n');
+
+    async function setupSharedProject() {
+      const projectRoot = path.join(tmpDir, 'shared-project');
+      const repoPath = path.join(projectRoot, '.teamai', 'team-repo');
+      await fse.ensureDir(repoPath);
+      await fse.ensureDir(path.join(projectRoot, `.${inlineTool}`, 'skills'));
+      await fse.ensureDir(path.join(projectRoot, '.workbuddy', 'rules'));
+      await fse.writeFile(path.join(projectRoot, 'AGENTS.md'), sharedAgentsMd);
+      vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+      vi.stubEnv('SHELL', '/bin/bash');
+
+      const teamConfig = makeTeamConfig({
+        toolPaths: { [inlineTool]: DEFAULT_TOOL_PATHS[inlineTool], workbuddy: DEFAULT_TOOL_PATHS.workbuddy },
+      });
+      const localConfig = makeLocalConfig(projectRoot, repoPath, { scope: 'project', projectRoot });
+      mockAutoDetectInit.mockResolvedValue({ localConfig, teamConfig });
+      return path.join(projectRoot, 'AGENTS.md');
+    }
+
+    it('targeted uninstall strips only the rules block while WorkBuddy still uses the file', async () => {
+      const agentsMd = await setupSharedProject();
+
+      await uninstall({ force: true, agent: inlineTool });
+
+      const after = await fse.readFile(agentsMd, 'utf-8');
+      expect(after).toContain('# Project notes');
+      expect(after).not.toContain(TEAMAI_RULES_START);
+      expect(after).toContain(TEAMAI_CULTURE_START);
+      expect(after).toContain(TEAMAI_CLAUDEMD_START);
+    });
+
+    it('full uninstall strips every managed block and keeps user content', async () => {
+      const agentsMd = await setupSharedProject();
+
+      await uninstall({ force: true });
+
+      expect(await fse.readFile(agentsMd, 'utf-8')).toBe('# Project notes\n');
+    });
   });
 
   // #938: Codex gets its instruction blocks in AGENTS.md and the team rules

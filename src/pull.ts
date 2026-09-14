@@ -21,7 +21,8 @@ import {
 import { getHandler, RulesHandler, DocsHandler, EnvHandler, AgentsHandler } from './resources/index.js';
 import { reportHeldAgents, type RedeployedCopy } from './resources/agents.js';
 import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } from './resources/docs.js';
-import { isToolInstalledForConfig, ResourceHandler, toolInstallRoot } from './resources/base.js';
+import { isToolInstalledForConfig, ResourceHandler } from './resources/base.js';
+import { toolInstallRoot } from './types.js';
 import { skillsDirForTool } from './resources/skills.js';
 import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
 import { flatStemsOfRemoved, ruleFileExtensionForTool, ruleFormatForTool, ruleStemsForTool } from './resources/rule-format.js';
