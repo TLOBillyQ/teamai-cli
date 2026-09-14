@@ -20,7 +20,7 @@ import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } f
 import { isToolInstalledForConfig, ResourceHandler } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
 import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
-import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
+import { ruleFileExtensionForTool, instructionInstallRoot, receivesRecallBlock } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, State } from './types.js';
@@ -1097,6 +1097,9 @@ async function pullForScope(
           // upgrade may add a new target file while the team repo SHA and tool
           // target set remain unchanged.
           await syncManagedInstructions(freshConfig, localConfig, roleContext, scopeLabel);
+          const rulesHandler = getHandler('rules') as RulesHandler;
+          await rulesHandler.inlineRulesIntoInstructionFiles(freshConfig, localConfig,
+            (await resolveDesiredRules(freshConfig, localConfig, roleContext)).items);
           // Also refresh the CLAUDE.md recall block so a CLI upgrade that ships
           // a new block reaches CLAUDE.md even when the repo HEAD is unchanged.
           await injectRecallBlockIntoTools(freshConfig, localConfig, scopeLabel);
@@ -1753,7 +1756,8 @@ async function syncManagedInstructions(
  * Inject (or replace) the teamai-recall block into every Tier-1 tool's CLAUDE.md.
  *
  * Only injected for Tier-1 tools that have BOTH `agents` and `claudemd`
- * configured. Tools without subagent support (cursor / codex / openclaw /
+ * configured, and never into the shared project-root AGENTS.md (see
+ * receivesRecallBlock). Tools without subagent support (cursor / openclaw /
  * workbuddy) are skipped — for them the recall flow runs purely via the
  * TodoWrite hint hook and the manual `teamai recall` command.
  *
@@ -1773,7 +1777,7 @@ export async function injectRecallBlockIntoTools(
         let injected = 0;
         for (const [tool, toolPath] of Object.entries(scopedToolPaths(config, localConfig))) {
             if (isAgentExcluded(localConfig, tool)) continue;
-            if (!toolPath.claudemd || !toolPath.agents) continue;
+            if (!receivesRecallBlock(toolPath, localConfig.scope)) continue;
             if (!await isToolInstalledForConfig(tool, toolPath.agents, localConfig)) continue;
 
             const baseDir = resolveToolBaseDir(tool, localConfig);

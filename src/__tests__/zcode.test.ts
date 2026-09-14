@@ -7,7 +7,11 @@ import { KNOWN_AGENTS } from '../known-agents.js';
 import { getHookStatus, hasTeamaiHooks, reconcileHooks } from '../hooks.js';
 import { agentFileExtensionForTool, ALL_SUPPORTED_TOOLS } from '../resources/agent-format.js';
 import { detectMcpFormat } from '../resources/mcp-format.js';
+import { inlinesRulesIntoInstructions } from '../resources/rule-format.js';
+import { injectRecallBlockIntoTools } from '../pull.js';
+import { scopedToolPaths } from '../types.js';
 import { HookDef, TeamaiConfigSchema } from '../types.js';
+import type { LocalConfig } from '../types.js';
 
 describe('ZCode support', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -20,7 +24,46 @@ describe('ZCode support', () => {
       agents: '.zcode/agents',
       settings: '.zcode/cli/config.json',
       mcp: '.agents/mcp.json',
+      claudemd: 'AGENTS.md',
+      userScope: { claudemd: '.zcode/AGENTS.md' },
     });
+  });
+
+  // ZCode reads ~/.zcode/AGENTS.md globally but <project>/AGENTS.md in a
+  // workspace, so the instructions file depends on the scope.
+  it('resolves the ZCode instructions file per scope', () => {
+    const config = TeamaiConfigSchema.parse({ team: 'test', repo: 'test/repo' });
+    expect(scopedToolPaths(config, { scope: 'user' }).zcode.claudemd).toBe('.zcode/AGENTS.md');
+    expect(scopedToolPaths(config, { scope: 'project' }).zcode.claudemd).toBe('AGENTS.md');
+    expect(inlinesRulesIntoInstructions('zcode')).toBe(true);
+  });
+
+  // The workspace-root AGENTS.md is shared with tools that have no
+  // teamai-recall subagent, so the recall block must not land there.
+  it('does not inject the recall block into the project-root AGENTS.md', async () => {
+    const root = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-zcode-recall-'));
+    try {
+      const projectRoot = path.join(root, 'project');
+      await fse.ensureDir(path.join(projectRoot, '.zcode', 'agents'));
+      const config = TeamaiConfigSchema.parse({ team: 'test', repo: 'test/repo' });
+      const toolPaths = { zcode: config.toolPaths.zcode };
+      const projectLocal = {
+        scope: 'project', projectRoot, recallEnabled: true,
+        repo: { localPath: path.join(root, 'repo'), remote: 'r' }, username: 'u', additionalRoles: [],
+      } as unknown as LocalConfig;
+
+      await injectRecallBlockIntoTools({ ...config, toolPaths }, projectLocal, 'project');
+      expect(await fse.pathExists(path.join(projectRoot, 'AGENTS.md'))).toBe(false);
+
+      // User scope (~/.zcode/AGENTS.md is ZCode's own file) keeps the block.
+      const homeDir = path.join(root, 'home');
+      await fse.ensureDir(path.join(homeDir, '.zcode', 'agents'));
+      vi.stubEnv('HOME', homeDir);
+      await injectRecallBlockIntoTools({ ...config, toolPaths }, { ...projectLocal, scope: 'user' } as LocalConfig, 'user');
+      expect(await fse.readFile(path.join(homeDir, '.zcode', 'AGENTS.md'), 'utf-8')).toContain('[teamai:recall-rules:start]');
+    } finally {
+      await fse.remove(root);
+    }
   });
 
   it('registers ZCode for discovery and Claude-style resources', () => {

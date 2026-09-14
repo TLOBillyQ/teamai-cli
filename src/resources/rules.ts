@@ -25,6 +25,8 @@ import {
   usesCopilotInstructions,
   isLegacyCursorRuleFile,
   inlinesRulesIntoInstructions,
+  instructionInstallRoot,
+  legacyInlineRulesDir,
 } from './rule-format.js';
 
 export class RulesHandler extends ResourceHandler {
@@ -453,10 +455,11 @@ export class RulesHandler extends ResourceHandler {
     // early return so removing the last rule also removes the glob.
     await this.activateOpencodeInstructions(teamConfig, localConfig, rules.length > 0);
 
-    // Kimi Code CLI has no rules directory: inline the rule bodies into a
-    // managed block of its AGENTS.md. Also before the early return so the block
-    // disappears when the team's last rule is removed.
+    // Kimi Code CLI, ZCode and Codex have no rules directory: inline the rule
+    // bodies into a managed block of their AGENTS.md. Also before the early
+    // return so the block disappears when the team's last rule is removed.
     await this.inlineRulesIntoInstructionFiles(teamConfig, localConfig, rules);
+    await this.removeLegacyInlineRuleCopies(teamConfig, localConfig, rules);
 
     // Empty set = no team rule reaches this directory right now. We deliberately do
     // NOT run the aggressive stale-file cleanup below in that case, because it would
@@ -574,14 +577,16 @@ export class RulesHandler extends ResourceHandler {
       await this.removeEmptyDirs(destDir);
     }
 
-    // 2. Remove legacy rules section from CLAUDE.md (no longer injected). Tools
-    // that get rules inlined into their instructions file use the same markers
-    // on purpose, so they are excluded from this cleanup.
+    // 2. Remove legacy rules section from CLAUDE.md (no longer injected). Files
+    // that get rules inlined use the same markers on purpose, so they are
+    // excluded by path — the workspace-root AGENTS.md can belong to ZCode and
+    // to a non-inlining tool (WorkBuddy, Hermes) at the same time.
+    const inlinedFiles = new Set((await this.inlineRuleTargets(teamConfig, localConfig)).map((t) => t.filePath));
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!toolPath.claudemd) continue;
-      if (inlinesRulesIntoInstructions(tool)) continue;
       const baseDir = resolveToolBaseDir(tool, localConfig);
       const claudeMdPath = path.join(baseDir, toolPath.claudemd);
+      if (inlinedFiles.has(claudeMdPath)) continue;
       try {
         const content = await readFileSafe(claudeMdPath);
         if (!content || !content.includes(TEAMAI_RULES_START)) continue;
@@ -605,24 +610,19 @@ export class RulesHandler extends ResourceHandler {
 
   /**
    * Inline every team rule body into a teamai-managed block of the instructions
-   * file (`claudemd`) of tools that have no rules directory (Kimi Code CLI).
-   * An empty rule set removes the block. Only touches tools that are installed
-   * for this scope — never creates `.kimi-code/` for someone who doesn't use it.
+   * file (`claudemd`) of tools that have no rules directory (Kimi Code CLI,
+   * ZCode). An empty rule set removes the block. Only touches tools that are
+   * installed for this scope — never creates `.kimi-code/` or `.zcode/` for
+   * someone who doesn't use them.
    */
-  private async inlineRulesIntoInstructionFiles(
+  async inlineRulesIntoInstructionFiles(
     teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
     rules: ResourceItem[],
   ): Promise<void> {
-    const baseDir = resolveBaseDir(localConfig);
     let bodies: string[] | null = null;
 
-    for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
-      if (!inlinesRulesIntoInstructions(tool)) continue;
-      if (isAgentExcluded(localConfig, tool)) continue;
-      if (!toolPath.claudemd) continue;
-      if (!await ResourceHandler.isToolInstalled(toolPath.claudemd, baseDir)) continue;
-
+    for (const { tool, filePath } of await this.inlineRuleTargets(teamConfig, localConfig)) {
       if (bodies === null) {
         bodies = [];
         for (const rule of rules) {
@@ -643,7 +643,6 @@ export class RulesHandler extends ResourceHandler {
       const blockBody = bodies.length > 0
         ? ['<!-- DO NOT EDIT: This section is auto-managed by teamai -->', '', ...bodies.flatMap((b) => [b, ''])].join('\n')
         : '';
-      const filePath = path.join(baseDir, toolPath.claudemd);
       try {
         const existing = (await readFileSafe(filePath)) ?? '';
         const merged = mergeManagedBlock(existing, TEAMAI_RULES_START, TEAMAI_RULES_END, blockBody);
@@ -659,6 +658,66 @@ export class RulesHandler extends ResourceHandler {
         log.warn(`Failed to inline rules into ${tool} instructions at ${filePath}: ${(e as Error).message}`);
       }
     }
+  }
+
+  /**
+   * Delete the `.md` rule copies older teamai versions wrote into the rules
+   * directory of a tool that now gets rules inlined (Codex's `.codex/rules/`).
+   * Only files named after a current team rule, a tombstoned rule, or a CLI
+   * built-in are teamai's; Starlark `.rules` files and user notes stay.
+   */
+  private async removeLegacyInlineRuleCopies(
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+    rules: ResourceItem[],
+  ): Promise<void> {
+    const baseDir = resolveBaseDir(localConfig);
+    let owned: Set<string> | null = null;
+
+    for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+      if (!inlinesRulesIntoInstructions(tool)) continue;
+      if (isAgentExcluded(localConfig, tool)) continue;
+      const legacyDir = legacyInlineRulesDir(tool, toolPath);
+      if (!legacyDir) continue;
+      const dir = path.join(baseDir, legacyDir);
+      if (!await pathExists(dir)) continue;
+
+      owned ??= new Set([
+        ...rules.map((r) => r.name),
+        ...await this.readTombstones(localConfig),
+        ...EXCLUDED_RULE_NAMES,
+      ]);
+      for (const file of await listFilesRecursive(dir)) {
+        const ruleName = ruleStemFromFilename(file);
+        if (!ruleName || !owned.has(ruleName)) continue;
+        await remove(path.join(dir, file));
+        log.debug(`Removed legacy rule copy ${file} from ${tool}`);
+      }
+      await this.removeEmptyDirs(dir);
+    }
+  }
+
+  /**
+   * Instructions files that receive inlined rules in this scope: enabled
+   * inline tools whose install root (e.g. `.zcode/`) exists. Gating on the
+   * install root rather than the file matters when `claudemd` is the shared
+   * workspace-root AGENTS.md, which exists in projects that don't use the tool.
+   */
+  private async inlineRuleTargets(
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+  ): Promise<Array<{ tool: string; filePath: string }>> {
+    const baseDir = resolveBaseDir(localConfig);
+    const targets: Array<{ tool: string; filePath: string }> = [];
+    for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+      if (!inlinesRulesIntoInstructions(tool)) continue;
+      if (isAgentExcluded(localConfig, tool)) continue;
+      if (!toolPath.claudemd) continue;
+      const installRoot = instructionInstallRoot(tool, toolPath) ?? toolPath.claudemd;
+      if (!await ResourceHandler.isToolInstalled(installRoot, baseDir)) continue;
+      targets.push({ tool, filePath: path.join(baseDir, toolPath.claudemd) });
+    }
+    return targets;
   }
 
   /**

@@ -39,6 +39,7 @@ import { RulesHandler } from '../resources/rules.js';
 import { loadStateForScope } from '../config.js';
 import type { TeamaiConfig, LocalConfig, State } from '../types.js';
 import { instructionInstallRoot } from '../resources/rule-format.js';
+import { TeamaiConfigSchema } from '../types.js';
 
 describe('RulesHandler.scanLocalForPush — modified rule detection', () => {
   let tmpDir: string;
@@ -1142,6 +1143,273 @@ describe('RulesHandler.pullAllRules — Kimi Code CLI inline rules', () => {
     const order = ['RULE A', 'RULE B', 'RULE C', 'RULE Z'].map((r) => content.indexOf(r));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((x, y) => x - y));
+  });
+});
+
+describe('RulesHandler.pullAllRules — ZCode inline rules (user scope)', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let handler: RulesHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-rules-zcode-'));
+    homeDir = path.join(tmpDir, 'home');
+    const repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'rules'));
+    await fse.ensureDir(path.join(homeDir, '.zcode'));
+    vi.stubEnv('HOME', homeDir);
+
+    handler = new RulesHandler();
+    teamConfig = TeamaiConfigSchema.parse({ team: 'test', repo: 'r' });
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'r' },
+      username: 'u', additionalRoles: [], scope: 'user',
+    } as unknown as LocalConfig;
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  const agentsMd = () => path.join(homeDir, '.zcode', 'AGENTS.md');
+  const teamRule = (name: string) => path.join(localConfig.repo.localPath, 'rules', `${name}.md`);
+
+  it('inlines rule bodies into a managed block of ~/.zcode/AGENTS.md, keeping user content, idempotently', async () => {
+    await fse.writeFile(agentsMd(), '# Mine\nkeep me\n');
+    await fse.writeFile(teamRule('coding'), '---\npaths: ["src/**"]\n---\n# Coding\nUse tabs.\n');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    const first = await fse.readFile(agentsMd(), 'utf8');
+    expect(first.startsWith('# Mine\nkeep me')).toBe(true);
+    expect(first).toContain('<!-- [teamai:rules:start] -->');
+    expect(first).toContain('<!-- [teamai:rules:end] -->');
+    expect(first).toContain('# Coding\nUse tabs.');
+    expect(first).not.toContain('paths:');
+    expect(await fse.pathExists(path.join(homeDir, '.zcode', 'rules'))).toBe(false);
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    expect(await fse.readFile(agentsMd(), 'utf8')).toBe(first);
+    expect(first.match(/teamai:rules:start/g)).toHaveLength(1);
+  });
+
+  it('does not create ~/.zcode when ZCode is not installed', async () => {
+    await fse.remove(path.join(homeDir, '.zcode'));
+    await fse.writeFile(teamRule('a'), 'rule A');
+    await handler.pullAllRules(teamConfig, localConfig);
+    expect(await fse.pathExists(path.join(homeDir, '.zcode'))).toBe(false);
+  });
+
+});
+
+describe('RulesHandler.pullAllRules — ZCode inline rules (project scope)', () => {
+  let tmpDir: string;
+  let projectRoot: string;
+  let handler: RulesHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-rules-zcode-project-'));
+    projectRoot = path.join(tmpDir, 'project');
+    const repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'rules'));
+    await fse.ensureDir(projectRoot);
+    vi.stubEnv('HOME', path.join(tmpDir, 'home'));
+
+    handler = new RulesHandler();
+    teamConfig = TeamaiConfigSchema.parse({ team: 'test', repo: 'r' });
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'r' },
+      username: 'u', additionalRoles: [], scope: 'project', projectRoot,
+    } as unknown as LocalConfig;
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  const agentsMd = () => path.join(projectRoot, 'AGENTS.md');
+  const teamRule = (name: string) => path.join(localConfig.repo.localPath, 'rules', `${name}.md`);
+
+  it('inlines rules into the workspace-root AGENTS.md when .zcode/ exists, idempotently', async () => {
+    await fse.ensureDir(path.join(projectRoot, '.zcode'));
+    await fse.writeFile(agentsMd(), '# Project\nkeep me\n');
+    await fse.writeFile(teamRule('coding'), '# Coding\nUse tabs.\n');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    const first = await fse.readFile(agentsMd(), 'utf8');
+    expect(first.startsWith('# Project\nkeep me')).toBe(true);
+    expect(first).toContain('<!-- [teamai:rules:start] -->');
+    expect(first).toContain('# Coding\nUse tabs.');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    expect(await fse.readFile(agentsMd(), 'utf8')).toBe(first);
+    expect(await fse.pathExists(path.join(projectRoot, '.zcode', 'AGENTS.md'))).toBe(false);
+  });
+
+  it('does not write an existing AGENTS.md or create .zcode/ when ZCode is not used', async () => {
+    await fse.writeFile(agentsMd(), '# Project\n');
+    await fse.writeFile(teamRule('a'), 'rule A');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    expect(await fse.readFile(agentsMd(), 'utf8')).toBe('# Project\n');
+    expect(await fse.pathExists(path.join(projectRoot, '.zcode'))).toBe(false);
+  });
+
+  it('keeps the rules block when another tool (WorkBuddy) shares AGENTS.md', async () => {
+    await fse.ensureDir(path.join(projectRoot, '.zcode'));
+    await fse.ensureDir(path.join(projectRoot, '.workbuddy', 'rules'));
+    await fse.writeFile(teamRule('a'), 'rule A');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+    const first = await fse.readFile(agentsMd(), 'utf8');
+    await handler.pullAllRules(teamConfig, localConfig);
+    const second = await fse.readFile(agentsMd(), 'utf8');
+
+    expect(second).toBe(first);
+    expect(second.match(/\[teamai:rules:start\]/g)).toHaveLength(1);
+    expect(second).toContain('rule A');
+    // WorkBuddy still gets its own copy in its rules directory.
+    expect(await fse.pathExists(path.join(projectRoot, '.workbuddy', 'rules', 'a.md'))).toBe(true);
+  });
+
+  it('strips a stale rules block from AGENTS.md once .zcode/ is gone', async () => {
+    await fse.writeFile(agentsMd(), '# Project\n\n<!-- [teamai:rules:start] -->\nold\n<!-- [teamai:rules:end] -->\n');
+    await fse.writeFile(teamRule('a'), 'rule A');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    expect(await fse.readFile(agentsMd(), 'utf8')).toBe('# Project\n');
+  });
+
+  it('still strips a legacy rules block from a non-inlining tool instructions file', async () => {
+    await fse.ensureDir(path.join(projectRoot, '.zcode'));
+    await fse.ensureDir(path.join(projectRoot, '.codebuddy', 'rules'));
+    const codebuddyMd = path.join(projectRoot, '.codebuddy', 'CODEBUDDY.md');
+    await fse.writeFile(codebuddyMd, '# Mine\n\n<!-- [teamai:rules:start] -->\nold\n<!-- [teamai:rules:end] -->\n');
+    await fse.writeFile(teamRule('a'), 'rule A');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    expect(await fse.readFile(codebuddyMd, 'utf8')).toBe('# Mine\n');
+    expect(await fse.readFile(agentsMd(), 'utf8')).toContain('[teamai:rules:start]');
+  });
+});
+
+describe('RulesHandler.pullAllRules — Codex inline rules', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let projectRoot: string;
+  let repoPath: string;
+  let handler: RulesHandler;
+  let teamConfig: TeamaiConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-rules-codex-'));
+    homeDir = path.join(tmpDir, 'home');
+    projectRoot = path.join(tmpDir, 'project');
+    repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'rules'));
+    await fse.ensureDir(homeDir);
+    await fse.ensureDir(projectRoot);
+    vi.stubEnv('HOME', homeDir);
+
+    handler = new RulesHandler();
+    teamConfig = TeamaiConfigSchema.parse({ team: 'test', repo: 'r' });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  const userConfig = () => ({
+    repo: { localPath: repoPath, remote: 'r' },
+    username: 'u', additionalRoles: [], scope: 'user',
+  } as unknown as LocalConfig);
+  const projectConfig = () => ({ ...userConfig(), scope: 'project', projectRoot } as LocalConfig);
+  const teamRule = async (name: string, content: string) => {
+    await fse.ensureDir(path.dirname(path.join(repoPath, 'rules', `${name}.md`)));
+    await fse.writeFile(path.join(repoPath, 'rules', `${name}.md`), content);
+  };
+
+  it('inlines rules into ~/.codex/AGENTS.md in user scope, keeping user content, without copying to ~/.codex/rules', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    const agentsMd = path.join(homeDir, '.codex', 'AGENTS.md');
+    await fse.writeFile(agentsMd, '# Mine\nkeep me\n');
+    await teamRule('common/coding', '---\npaths: ["src/**"]\n---\n# Coding\nUse tabs.\n');
+
+    await handler.pullAllRules(teamConfig, userConfig());
+    const first = await fse.readFile(agentsMd, 'utf8');
+    expect(first.startsWith('# Mine\nkeep me')).toBe(true);
+    expect(first).toContain('<!-- [teamai:rules:start] -->');
+    expect(first).toContain('# Coding\nUse tabs.');
+    expect(first).not.toContain('paths:');
+    expect(await fse.pathExists(path.join(homeDir, '.codex', 'rules'))).toBe(false);
+
+    await handler.pullAllRules(teamConfig, userConfig());
+    expect(await fse.readFile(agentsMd, 'utf8')).toBe(first);
+
+    // Removing the team's last rule removes the block.
+    await fse.remove(path.join(repoPath, 'rules', 'common'));
+    await handler.pullAllRules(teamConfig, userConfig());
+    expect(await fse.readFile(agentsMd, 'utf8')).toBe('# Mine\nkeep me\n');
+  });
+
+  it('removes the .md rule copies teamai left in .codex/rules but keeps user files there', async () => {
+    const codexRules = path.join(homeDir, '.codex', 'rules');
+    await fse.ensureDir(path.join(codexRules, 'common'));
+    await fse.writeFile(path.join(codexRules, 'common', 'coding.md'), 'old copy');
+    await fse.writeFile(path.join(codexRules, 'teamai-recall.md'), 'built-in copy');
+    await fse.writeFile(path.join(codexRules, 'retired.md'), 'removed from the team');
+    await fse.writeFile(path.join(codexRules, 'default.rules'), 'prefix_rule(pattern = ["ls"])');
+    await fse.writeFile(path.join(codexRules, 'my-notes.md'), 'mine');
+    await fse.writeFile(path.join(repoPath, 'rules', '.removed'), 'retired\n');
+    await teamRule('common/coding', '# Coding');
+
+    await handler.pullAllRules(teamConfig, userConfig());
+
+    expect(await fse.pathExists(path.join(codexRules, 'common'))).toBe(false);
+    expect(await fse.pathExists(path.join(codexRules, 'teamai-recall.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(codexRules, 'retired.md'))).toBe(false);
+    expect(await fse.readFile(path.join(codexRules, 'default.rules'), 'utf8')).toBe('prefix_rule(pattern = ["ls"])');
+    expect(await fse.readFile(path.join(codexRules, 'my-notes.md'), 'utf8')).toBe('mine');
+    expect(await fse.readFile(path.join(homeDir, '.codex', 'AGENTS.md'), 'utf8')).toContain('# Coding');
+  });
+
+  it('inlines rules into the project-root AGENTS.md only when the project has .codex/', async () => {
+    const agentsMd = path.join(projectRoot, 'AGENTS.md');
+    await fse.writeFile(agentsMd, '# Project\n');
+    await teamRule('a', 'rule A');
+
+    await handler.pullAllRules(teamConfig, projectConfig());
+    expect(await fse.readFile(agentsMd, 'utf8')).toBe('# Project\n');
+    expect(await fse.pathExists(path.join(projectRoot, '.codex'))).toBe(false);
+
+    await fse.ensureDir(path.join(projectRoot, '.codex'));
+    await handler.pullAllRules(teamConfig, projectConfig());
+    const content = await fse.readFile(agentsMd, 'utf8');
+    expect(content.startsWith('# Project\n')).toBe(true);
+    expect(content).toContain('rule A');
+    expect(await fse.pathExists(path.join(projectRoot, '.codex', 'AGENTS.md'))).toBe(false);
+  });
+
+  it('writes a single rules block when Codex and ZCode share the project-root AGENTS.md', async () => {
+    await fse.ensureDir(path.join(projectRoot, '.codex'));
+    await fse.ensureDir(path.join(projectRoot, '.zcode'));
+    await teamRule('a', 'rule A');
+
+    await handler.pullAllRules(teamConfig, projectConfig());
+    await handler.pullAllRules(teamConfig, projectConfig());
+
+    const content = await fse.readFile(path.join(projectRoot, 'AGENTS.md'), 'utf8');
+    expect(content.match(/\[teamai:rules:start\]/g)).toHaveLength(1);
+    expect(content.match(/rule A/g)).toHaveLength(1);
   });
 });
 
