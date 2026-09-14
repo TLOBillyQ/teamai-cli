@@ -1446,6 +1446,19 @@ GitHub Copilot CLI 已支持其官方自定义指令、Rules、Skills、自定�
 - **Hooks** 以 OpenCode *plugin* 形式交付，而非配置文件条目——OpenCode 没有 `hooks` 数组，它会**同时**加载 `~/.config/opencode/plugin/` 和 `<project>/.opencode/plugin/` 下的 JS/TS 插件。两个目录都有插件时会被加载两次，每个事件也就派发两次，因此 teamai 只保留一份：写在用户目录的 `teamai-hooks.ts`，覆盖所有项目；早期布局残留的项目级副本会在下次同步时被删除。这与其他工具一致——它们的 `settings.json` hooks 同样放在 HOME，靠传给 `hook-dispatch` 的 `cwd` 做作用域判断。插件订阅 OpenCode 自己的事件，并 shell 到其他所有工具共用的 `teamai hook-dispatch` 入口。事件映射对齐 Claude 内置集合：`session.created` → session-start、`session.idle` → stop、`chat.message` → prompt-submit、`tool.execute.after` → post-tool-use。插件会转发与其他工具一致的 STDIN 负载（`cwd`、`tool_name`、`tool_input`、`prompt`），并把 OpenCode 的小写工具 id（`skill`、`todowrite`）映射回 handler 注册表期望的 PascalCase matcher。OpenCode 无法把 hook 的 stdout 回注到会话，因此 hooks 只为副作用运行（状态上报 / 同步 / 更新）。注意 OpenCode 会 **await** 它的具名 hook（`chat.message`、`tool.execute.after`），所以这两个事件的派发会短暂等待 `teamai` 子进程后 agent 才继续；错误始终被吞掉，hook 永远不会让会话失败。服务端下发的 agent hook（`teamai-agent-<slug>.ts`）同样装在这个用户级 plugin 目录下。
 - **MCP** server 位于共享 `opencode.json` 的 `mcp` 键下（详见上文 MCP 章节）。
 
+### Codex
+
+Codex 只从 `AGENTS.md` 读取指令：全局的 `~/.codex/AGENTS.md`，以及从仓库根目录一路到当前工作目录的 `AGENTS.md`。它的 `.codex/rules/` 目录放的是 Starlark 写的 `.rules` 文件，用来决定哪些命令可以在沙箱外运行，并不是指令文件，拷进去的 Markdown 规则永远不会被加载。因此 teamai 对 Codex 采用与 Kimi Code CLI 相同的做法：
+
+- **Rules** 会被**内联**进 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`）：**user scope** 下写入 `~/.codex/AGENTS.md`（仅当 `~/.codex/` 存在），**project scope** 下写入项目根目录的 `AGENTS.md`（仅当项目存在 `.codex/` 目录；Codex 不读 `.codex/AGENTS.md`，teamai 也从不写它）。规则正文按路径顺序拼接、去掉 frontmatter，区块外你自己的内容保持不变，团队最后一条 rule 消失时区块随之移除。不会往 `.codex/rules/` 拷任何文件，pull 还会删掉旧版 teamai 留在那里的 `.md` 规则副本（只删与团队规则、已删除的团队规则或内置规则同名的文件），你的 `.rules` 文件保持不动。
+- **Culture、共享指令和 recall 区块**在 user scope 下写入 `~/.codex/AGENTS.md`。项目根目录的 `AGENTS.md` 与 ZCode、DSH、WorkBuddy、Hermes 共用，因此只写团队文化与共享指令、不写 recall 区块，ZCode、Codex 与 DSH 在其中共用同一个规则区块。`teamai uninstall --agent codex` 会保留其他已安装工具仍在使用的区块。
+
+### DeepSeek Harness
+
+通过 `--agent dsh` 显式启用 DeepSeek Harness。project scope 下，技能写入 `.dsh/skills/`，团队规则正文内联进工作区根目录 `AGENTS.md` 的 `teamai:rules` 托管区块，不创建 `.dsh/rules/`。规则 frontmatter 会被剥除，因此按路径限定的规则对所有任务生效。区块之外的个人内容保持不变。注入受 DSH 安装根目录门控；被排除的 DSH 不会收到文件。
+
+Codex、ZCode、DSH 共用一个规则区块。从 `enabledAgents` 移除 Codex 或 Claude 后执行 `pull --force`，只要仍启用 DSH，该区块就会保留。`uninstall --agent dsh` 保留其他已安装工具仍在使用的区块；DSH 是最后一个规则认领者时，既有移除计划会列出并删除规则区块。团队最后一条规则删除后，该区块也会被移除。
+
 ### Kimi Code CLI
 
 Kimi Code CLI 是内置目标（`--agent kimi`），与其他工具一样通过 `~/.kimi-code` 探测。它的项目级目录会被原生扫描，但它**没有 rules 目录**，且不会展开 `AGENTS.md` 里的 `@file` 引用，因此 teamai 做了适配：
@@ -1472,7 +1485,9 @@ ZCode 已作为内置目标支持。Skills 下发到 `.zcode/skills/`（ZCode �
 - Windows 上，钩子条目通过隐藏的 **wscript VBS 启动器**执行（`wscript.exe <teamai-hook-dispatch.vbs> <分发命令尾段>`）：wscript 属 GUI 子系统，钩子运行绝不弹控制台黑框；启动器把 STDIN 暂存为临时文件再转发，保证 payload 完整到达 `hook-dispatch`。超时按事件放宽（会话启动 180 秒、stop / prompt 提交 60 秒、工具调用后 30 秒），避免会话启动时携带仓库拉取的分发被中途掐断。含多字节文本（如中文）的 payload 在启动器的 ANSI 代码页暂存环节可能降级——身份字段会被抢救，降级分发仍能正确关联到会话；卸载时会同时清除条目与脚本文件。
 - POSIX 上条目就是普通的 `bash -lc <分发命令尾段>` argv 向量，不写入启动器；两个平台上，命令尾段都以 argv 末位元素原样存储——这正是托管条目识别与托管清单比对的依据。
 
-以上路径已对照 ZCode 桌面端实测验证：设置页「新建子智能体」写入的就是 `~/.zcode/agents/*.md`，反向放入的文件也会出现在页面的已安装列表中。MCP Server 下发到 `~/.agents/mcp.json`（用户级，Claude 的 `mcpServers` 结构——正是 ZCode 自己的 MCP 设置页读取的文件）。项目级暂未接入：ZCode 的工作区 MCP 使用不同的键（`.zcode/config.json` 内的 `mcp.servers`），Claude 写入器无法生成该结构。ZCode 暂无用户级 Rules 目录约定，因此 Rules 不同步。
+以上路径已对照 ZCode 桌面端实测验证：设置页「新建子智能体」写入的就是 `~/.zcode/agents/*.md`，反向放入的文件也会出现在页面的已安装列表中。MCP Server 下发到 `~/.agents/mcp.json`（用户级，Claude 的 `mcpServers` 结构——正是 ZCode 自己的 MCP 设置页读取的文件）。项目级暂未接入：ZCode 的工作区 MCP 使用不同的键（`.zcode/config.json` 内的 `mcp.servers`），Claude 写入器无法生成该结构。
+
+**Rules** 在 **user scope** 下会被**内联**进 `~/.zcode/AGENTS.md` 的 teamai 受管区块（`<!-- [teamai:rules:start] -->` … `<!-- [teamai:rules:end] -->`），这是 ZCode 每次会话都会前置的全局指令文件。ZCode 没有 rules 目录，也不展开 `@file` 引用，因此做法与 Kimi Code CLI 完全一致：规则正文按路径顺序拼接、去掉 frontmatter、区块外你自己的内容保持不变、团队最后一条 rule 消失时区块随之移除，且不会往 `.zcode/rules/` 拷任何文件。团队文化、共享指令与 recall 区块也写入同一文件。该路径通过 `toolPaths` 里的 `userScope.claudemd` 接入，仅在 `~/.zcode/` 存在时生效。**project scope** 下 ZCode 读的是工作区根目录的 `AGENTS.md`（`claudemd: AGENTS.md`），规则区块以同样方式内联进去，但仅在项目存在 `.zcode/` 目录时写入；没有 `.zcode/` 的项目即使已有 `AGENTS.md` 也不会被改动。该文件是共用的：WorkBuddy、Hermes 会往里写团队文化与共享指令区块，Codex 与 DSH 也会内联同一个规则区块（见 [Codex](#codex)），其他原生读取 `AGENTS.md` 的工具同样会读到内联的团队规则。因此这里不写 recall 区块，因为读取它的工具并非都有 `teamai-recall` 子代理。只要 Codex 或 DSH 仍在使用规则区块，`teamai uninstall --agent zcode` 就会保留它；其他已安装工具仍在使用的区块也会保留。
 
 ### Oh My Pi
 
@@ -1770,7 +1785,7 @@ toolPaths:                     # 可选；合并到内置默认表之上（见�
 
 #### `toolPaths`
 
-`toolPaths` 为每个工具（`claude`、`codex`、`kimi` 等）指定 TeamAI 的安装路径：`skills`、`rules`、`settings`、`claudemd`、`agents`、`mcp`、`mcpProject`，以及 `userScope`（user scope 下对 `skills` / `rules` / `agents` 的覆盖）。TeamAI 为每个支持的工具内置了一张默认表，大多数团队仓无需配置 `toolPaths`。
+`toolPaths` 为每个工具（`claude`、`codex`、`kimi` 等）指定 TeamAI 的安装路径：`skills`、`rules`、`settings`、`claudemd`、`agents`、`mcp`、`mcpProject`，以及 `userScope`（user scope 下对 `skills` / `rules` / `agents` / `claudemd` 的覆盖）。TeamAI 为每个支持的工具内置了一张默认表，大多数团队仓无需配置 `toolPaths`。
 
 团队仓配置了 `toolPaths` 时，会按工具、按字段合并到内置默认表之上：
 
@@ -1784,8 +1799,8 @@ toolPaths:
   claude:
     skills: .claude/custom-skills   # 只修改 claude 的 skills 路径，其他工具和字段沿用默认值
   kimi: false                       # 不再向 Kimi 安装
-  codex:
-    rules: false                    # 保留 codex，但去掉其 rules 路径
+  cursor:
+    rules: false                    # 保留 cursor，但去掉其 rules 路径
 ```
 
 只写需要修改的部分。把整张表抄进团队仓仍然可用，但其中列出的每个字段都会固定为旧值，之后这些默认值的变更将不会同步到团队；抄表之后新增的工具和字段会自动补齐。
@@ -1828,14 +1843,14 @@ contributeHintEnabled: false   # 可选，每机器覆盖 sharing.contributeHint
 
 teamai 会往几类由你自己维护的文件（各工具的指令文件、shell profile）里写内容，并始终把这部分内容放在一对固定的起止标记之间。标记之间的内容每次同步都会重新生成，请勿手改；标记之外的内容不会被改动，`teamai uninstall` 也只移除这些区块。编写安装验收、健康检查脚本时，请精确匹配下表中的字符串。
 
-路径在 project scope 下相对项目根目录，在 user scope 下相对 home 目录。工具的*指令文件*即 `toolPaths` 中该工具的 `claudemd` 路径：`.claude/CLAUDE.md`（`claude`）、`.claude-internal/CLAUDE.md`（`claude-internal`）、`.tclaude/CLAUDE.md`（`tclaude`）、`.codebuddy/CODEBUDDY.md`（`codebuddy`）、`.kimi-code/AGENTS.md`（`kimi`）、`.openclaw/workspace/AGENTS.md`（`openclaw`）、`AGENTS.md`（`hermes`、`workbuddy`）。没有指令文件的工具（如 `codex`、`cursor`、`opencode`、`qoder`、`joycode`）不会被写入任何指令文件区块。工具自身的目录（如 `.claude/`、`.kimi-code/`）存在时才会写入这些区块；例外是 `hermes`，它不做该检查，因此团队文化与共享指令区块总会写入根目录的 `AGENTS.md`。
+路径在 project scope 下相对项目根目录，在 user scope 下相对 home 目录。工具的*指令文件*即 `toolPaths` 中该工具的 `claudemd` 路径：`.claude/CLAUDE.md`（`claude`）、`.claude-internal/CLAUDE.md`（`claude-internal`）、`.tclaude/CLAUDE.md`（`tclaude`）、`.codebuddy/CODEBUDDY.md`（`codebuddy`）、`.kimi-code/AGENTS.md`（`kimi`）、`.zcode/AGENTS.md`（`zcode`，user scope）、`.codex/AGENTS.md`（`codex`，user scope）、`.openclaw/workspace/AGENTS.md`（`openclaw`）、`AGENTS.md`（`hermes`、`workbuddy`、`dsh`，以及 project scope 下的 `zcode` / `codex`）。没有指令文件的工具（如 `cursor`、`opencode`、`qoder`、`joycode`）不会被写入任何指令文件区块。工具自身的目录（如 `.claude/`、`.kimi-code/`、`.zcode/`、`.codex/`）存在时才会写入这些区块；例外是 `hermes`，它不做该检查，因此团队文化与共享指令区块总会写入根目录的 `AGENTS.md`。
 
 | 标记（起 / 止） | 写入位置 | 写入时机 | 常量（`src/types.ts`） |
 | --- | --- | --- | --- |
-| `<!-- [teamai:rules:start] -->` / `<!-- [teamai:rules:end] -->` | `kimi`：`.kimi-code/AGENTS.md`；`hermes`：`$HERMES_HOME` 下的 `SOUL.md`（默认 `~/.hermes/SOUL.md`） | `pull` 时内联所有团队规则正文（这些工具没有 rules 目录）；团队最后一条 rule 消失时区块随之移除 | `TEAMAI_RULES_START` / `TEAMAI_RULES_END` |
+| `<!-- [teamai:rules:start] -->` / `<!-- [teamai:rules:end] -->` | `kimi`：`.kimi-code/AGENTS.md`；`zcode`：`~/.zcode/AGENTS.md`（user scope）、工作区根目录 `AGENTS.md`（project scope，仅当 `.zcode/` 存在）；`codex`：`~/.codex/AGENTS.md`（user scope）、工作区根目录 `AGENTS.md`（project scope，仅当 `.codex/` 存在）；`dsh`：工作区根目录 `AGENTS.md`（project scope，仅当 `.dsh/` 存在）；`hermes`：`$HERMES_HOME` 下的 `SOUL.md`（默认 `~/.hermes/SOUL.md`） | `pull` 时内联所有团队规则正文（这些工具没有 rules 目录）；团队最后一条 rule 消失时区块随之移除 | `TEAMAI_RULES_START` / `TEAMAI_RULES_END` |
 | `<!-- [teamai:culture:start] -->` / `<!-- [teamai:culture:end] -->` | 各工具的指令文件 | `pull` 时，团队仓存在 `culture.md`（见[团队文化](#团队文化)） | `TEAMAI_CULTURE_START` / `TEAMAI_CULTURE_END` |
 | `<!-- [teamai:claudemd:start] -->` / `<!-- [teamai:claudemd:end] -->` | 各工具的指令文件 | `pull` 时，团队仓 `claudemd/` 下有属于你当前 namespace 的共享指令 | `TEAMAI_CLAUDEMD_START` / `TEAMAI_CLAUDEMD_END` |
-| `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | 同时支持子代理的工具的指令文件：`claude`、`claude-internal`、`tclaude`、`codebuddy`、`kimi` | recall 开启时由 `pull` 与 `teamai recall enable` 写入（默认关闭，可通过 `sharing.recall.enabled` 或 `teamai recall enable` 开启），`teamai recall disable` 移除；内容是让主对话调用 `teamai-recall` 子代理的说明 | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
+| `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | 同时支持子代理的工具的指令文件：`claude`、`claude-internal`、`tclaude`、`codebuddy`、`kimi`、`zcode`、`codex`（`zcode` 与 `codex` 仅 user scope：项目根目录 `AGENTS.md` 与没有 recall 子代理的工具共用） | recall 开启时由 `pull` 与 `teamai recall enable` 写入（默认关闭，可通过 `sharing.recall.enabled` 或 `teamai recall enable` 开启），`teamai recall disable` 移除；内容是让主对话调用 `teamai-recall` 子代理的说明 | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
 | `# [teamai:env:start]` / `# [teamai:env:end]` | shell profile：设置了 `sharing.env.shellProfilePath` 则用它，否则 `$SHELL` 为 zsh 时是 `~/.zshrc`，其余为 `~/.bashrc` | `pull` 时，团队仓定义了 env 变量且 `sharing.env.injectShellProfile` 不为 `false`；区块里只有一行 source teamai 的 `env.sh` | `TEAMAI_ENV_START` / `TEAMAI_ENV_END` |
 | `--- [teamai:recall:start] ---` / `--- [teamai:recall:end] ---` | **不落盘**，只由 `teamai recall` 打印到终端（stdout） | 每次运行 `teamai recall`；起始行后面会跟结果数，如 `--- [teamai:recall:start] --- (3 results)` | `TEAMAI_RECALL_OUTPUT_START` / `TEAMAI_RECALL_OUTPUT_END` |
 
@@ -1875,6 +1890,8 @@ teamai uninstall --agent claude
 ### 只卸载单个工具（`--agent <tool>`）
 
 `--agent <tool>` 只移除该工具的 teamai 资源（hooks、CLAUDE.md 块、skills、rules、团队同步的自定义 agents、内置 agents）。工具名即 `toolPaths` 的键（如 `claude`、`codex`、`codebuddy`），匹配大小写不敏感。传入未知工具名会直接报错并列出可用工具、不执行任何删除，并以非零状态码退出。
+
+若该工具的指令文件还被其他已安装工具使用（project scope 下工作区根目录的 `AGENTS.md` 由 `zcode`、`codex`、`dsh`、`workbuddy`、`hermes` 共用），只移除其他工具不依赖的区块。例如只安装了 ZCode 和 WorkBuddy 时，`--agent zcode` 会剥掉规则区块，但保留 WorkBuddy 仍在读取的团队文化与共享指令区块。全量 `teamai uninstall` 会移除全部区块。
 
 跨工具共享资源（shell profile env 块、docs 目录、`~/.teamai/`）**仅当该工具自身存在 teamai 资源、且它是最后一个仍在使用 teamai 的工具时**才一并移除，否则会为其余工具保留。（因此，定向卸载一个自身没有任何 teamai 资源的工具是 no-op，即便它恰好是唯一的工具，也不会删除共享资源。）
 

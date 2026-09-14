@@ -62,6 +62,7 @@ import {
   managedMcpManifestPath,
   managedMcpManifestKey,
   managedMcpWorkspaceId,
+  scopedToolPaths,
   type DashboardEvent,
   type LocalConfig,
   type ManagedMcpManifest,
