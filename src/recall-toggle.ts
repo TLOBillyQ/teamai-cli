@@ -8,7 +8,7 @@ import {
   agentFileExtensionForTool,
   type ToolName,
 } from './resources/agent-format.js';
-import { ruleFileExtensionForTool } from './resources/rule-format.js';
+import { receivesRecallBlock, ruleFileExtensionForTool } from './resources/rule-format.js';
 import { LEGACY_RECALL_SKILL_NAMES, builtinSkillsTarget, pruneLegacyBuiltinSkills } from './builtin-skills.js';
 import {
   resolveToolBaseDir,
@@ -104,7 +104,7 @@ async function deployRecallArtifacts(teamConfig: TeamaiConfig, localConfig: Loca
 
   for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
     if (isAgentExcluded(localConfig, tool)) continue;
-    if (!toolPath.claudemd || !toolPath.agents) continue;
+    if (!receivesRecallBlock(toolPath, localConfig.scope)) continue;
     if (!await isToolInstalledForConfig(tool, toolPath.agents, localConfig)) continue;
 
     const baseDir = resolveToolBaseDir(tool, localConfig);

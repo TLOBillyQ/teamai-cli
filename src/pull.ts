@@ -20,7 +20,7 @@ import { listStaleDocDirectories, resolveDesiredDocs, resolveDocsDestination } f
 import { isToolInstalledForConfig, ResourceHandler } from './resources/base.js';
 import { skillsDirForTool } from './resources/skills.js';
 import { findDuplicateSkillNames, reportDuplicateSkills } from './resources/skill-duplicates.js';
-import { ruleFileExtensionForTool, instructionInstallRoot } from './resources/rule-format.js';
+import { ruleFileExtensionForTool, instructionInstallRoot, receivesRecallBlock } from './resources/rule-format.js';
 import { AGENT_FILE_EXTENSIONS } from './resources/agent-format.js';
 import {
   forgetDelivered, judgeCopy, openLedger, removedCopyChanged, reportKept, type DeliveredHashes, type DeliveryLedger,
@@ -1809,7 +1809,8 @@ async function syncManagedInstructions(
  * Inject (or replace) the teamai-recall block into every Tier-1 tool's CLAUDE.md.
  *
  * Only injected for Tier-1 tools that have BOTH `agents` and `claudemd`
- * configured. Tools without subagent support (cursor / codex / openclaw /
+ * configured, and never into the shared project-root AGENTS.md (see
+ * receivesRecallBlock). Tools without subagent support (cursor / openclaw /
  * workbuddy) are skipped — for them the recall flow runs purely via the
  * TodoWrite hint hook and the manual `teamai recall` command.
  *
@@ -1829,7 +1830,7 @@ export async function injectRecallBlockIntoTools(
         let injected = 0;
         for (const [tool, toolPath] of Object.entries(scopedToolPaths(config, localConfig))) {
             if (isAgentExcluded(localConfig, tool)) continue;
-            if (!toolPath.claudemd || !toolPath.agents) continue;
+            if (!receivesRecallBlock(toolPath, localConfig.scope)) continue;
             if (!await isToolInstalledForConfig(tool, toolPath.agents, localConfig)) continue;
 
             const baseDir = resolveToolBaseDir(tool, localConfig);

@@ -11,6 +11,9 @@
  * new per-tool extension never has to be re-discovered call site by call site.
  */
 
+import path from 'node:path';
+import type { Scope } from '../types.js';
+
 const CURSOR_MDC_RULE_TOOLS = new Set(['cursor', 'joycode']);
 const COPILOT_INSTRUCTIONS_RULE_TOOLS = new Set(['copilot']);
 
@@ -31,18 +34,32 @@ export function usesCopilotInstructions(tool: string): boolean {
 }
 
 /**
- * Tools with no rules directory at all. Kimi Code CLI only loads instructions
- * from AGENTS.md, and it does not expand `@file` references there, so the only
- * way a team rule reaches the model is its full text inside that file. For
- * these tools teamai inlines every rule body into a managed block in the
- * tool's `claudemd` file instead of copying files (which the tool would
- * silently ignore).
+ * Tools with no instructions rules directory. Kimi Code CLI, ZCode, Codex and DSH
+ * only load instructions from AGENTS.md, and none expands `@file` references
+ * there, so the only way a team rule reaches the model is its full text inside
+ * that file. For these tools teamai inlines every rule body into a managed
+ * block in the tool's `claudemd` file instead of copying files (which the tool
+ * would silently ignore).
  */
-const INLINE_INSTRUCTION_RULE_TOOLS = new Set(['kimi']);
+const INLINE_INSTRUCTION_RULE_TOOLS = new Set(['kimi', 'zcode', 'codex', 'dsh']);
 
 /** True when the tool receives team rules inlined into its instructions file. */
 export function inlinesRulesIntoInstructions(tool: string): boolean {
   return INLINE_INSTRUCTION_RULE_TOOLS.has(tool);
+}
+
+/**
+ * Rules directories older teamai versions copied `.md` rules into, for tools
+ * that now get rules inlined. Codex never read them: `.codex/rules/` holds its
+ * Starlark `.rules` command policies. Pull and uninstall remove teamai's copies
+ * there and leave every other file alone.
+ */
+const LEGACY_INLINE_RULE_DIRS: Readonly<Record<string, string>> = { codex: '.codex/rules' };
+
+/** Legacy rules directory teamai's `.md` copies may still sit in, if any. */
+export function legacyInlineRulesDir(tool: string, toolPath: { rules?: string }): string | undefined {
+  // A team that still configures a rules dir for the tool keeps using it.
+  return toolPath.rules ? undefined : LEGACY_INLINE_RULE_DIRS[tool];
 }
 
 /**
@@ -58,6 +75,21 @@ export function instructionInstallRoot(
 ): string | undefined {
   if (toolPath.rules) return toolPath.rules;
   return inlinesRulesIntoInstructions(tool) ? toolPath.skills : undefined;
+}
+
+/**
+ * True when the teamai-recall block belongs in the tool's instructions file:
+ * the tool has both an instructions file and subagents. The workspace-root
+ * AGENTS.md (ZCode's and Codex's project-scope instructions file) is also read
+ * by tools without a teamai-recall subagent (WorkBuddy, Hermes), so it is
+ * excluded.
+ */
+export function receivesRecallBlock<T extends { claudemd?: string; agents?: string }>(
+  toolPath: T,
+  scope: Scope,
+): toolPath is T & { claudemd: string; agents: string } {
+  if (!toolPath.claudemd || !toolPath.agents) return false;
+  return !(scope === 'project' && path.posix.normalize(toolPath.claudemd) === 'AGENTS.md');
 }
 
 /**
