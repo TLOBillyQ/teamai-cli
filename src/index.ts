@@ -298,7 +298,9 @@ rolesCmd
 rolesCmd
   .command('add <id>')
   .description('Add a new role to the manifest (admin)')
-  .requiredOption('--namespaces <ns>', 'Comma-separated resource namespaces (e.g. common,hai)')
+  .option('--namespaces <ns>', 'Comma-separated namespaces for both knowledge and skills (e.g. common,hai)')
+  .option('--knowledge <ns>', 'Comma-separated knowledge namespaces (overrides --namespaces for knowledge)')
+  .option('--skills <ns>', 'Comma-separated skills namespaces (overrides --namespaces for skills)')
   .option('-d, --description <desc>', 'Description for the role')
   .action(async (id: string, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
@@ -318,8 +320,12 @@ rolesCmd
 rolesCmd
   .command('update <id>')
   .description('Update a role in the manifest (admin)')
-  .option('--add-namespaces <ns>', 'Comma-separated namespaces to add')
-  .option('--remove-namespaces <ns>', 'Comma-separated namespaces to remove')
+  .option('--add-knowledge <ns>', 'Comma-separated knowledge namespaces to add')
+  .option('--remove-knowledge <ns>', 'Comma-separated knowledge namespaces to remove')
+  .option('--add-skills <ns>', 'Comma-separated skills namespaces to add')
+  .option('--remove-skills <ns>', 'Comma-separated skills namespaces to remove')
+  .option('--add-namespaces <ns>', 'Comma-separated namespaces to add to both knowledge and skills')
+  .option('--remove-namespaces <ns>', 'Comma-separated namespaces to remove from both knowledge and skills')
   .option('-d, --description <desc>', 'New description for the role')
   .action(async (id: string, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;

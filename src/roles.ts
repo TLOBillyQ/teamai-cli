@@ -1,10 +1,10 @@
 import path from 'node:path';
-import YAML from 'yaml';
+import YAML, { isAlias, isMap, isNode, isSeq, YAMLMap, YAMLSeq } from 'yaml';
 import { z } from 'zod';
 import { readFileSafe, ensureDir, writeFile } from './utils/fs.js';
 import { log } from './utils/logger.js';
 
-const ROLE_RESOURCE_TYPES = ['knowledge', 'skills', 'agents'] as const;
+export const ROLE_RESOURCE_TYPES = ['knowledge', 'skills', 'agents'] as const;
 
 export type RoleResourceType = typeof ROLE_RESOURCE_TYPES[number];
 
@@ -109,6 +109,102 @@ export async function loadRolesManifest(repoPath: string): Promise<RolesManifest
   return validateManifestShape(raw);
 }
 
+/**
+ * Render the manifest as YAML. When `existing` is the current file content, the
+ * document is edited in place so comments, key order and flow-style lists
+ * survive; only the lists that actually changed are re-emitted. Every list is
+ * created as its own node, so knowledge and skills never share an anchor.
+ */
+export function renderRolesManifest(manifest: RolesManifest, existing?: string | null): string {
+  const doc = existing ? YAML.parseDocument(existing) : new YAML.Document({ version: manifest.version, roles: [] });
+  if (doc.errors.length > 0 || !isMap(doc.contents)) {
+    return YAML.stringify(manifest, { aliasDuplicateObjects: false });
+  }
+
+  doc.set('version', manifest.version);
+  if (manifest.defaults !== undefined && !doc.has('defaults')) {
+    doc.set('defaults', doc.createNode(manifest.defaults));
+  }
+
+  const existingSeq = doc.get('roles');
+  const seq: YAMLSeq = isSeq(existingSeq) ? existingSeq : new YAMLSeq();
+  if (seq !== existingSeq) doc.set('roles', seq);
+
+  const existingById = new Map<string, YAMLMap>();
+  for (const item of seq.items) {
+    if (isMap(item)) {
+      const id = item.get('id');
+      if (typeof id === 'string') existingById.set(id, item);
+    }
+  }
+
+  // Older writers emitted `skills: *a1` pointing at the knowledge list (or even
+  // `resources: *r` across roles). Inline every alias across the whole document
+  // before touching anything, since dropping an anchor would orphan its aliases.
+  for (const node of existingById.values()) inlineResourceAliases(doc, node);
+
+  seq.items = manifest.roles.map((role) => {
+    const node = existingById.get(role.id);
+    if (!node) return doc.createNode(role, { aliasDuplicateObjects: false });
+    syncRoleNode(doc, node, role);
+    return node;
+  });
+
+  return doc.toString();
+}
+
+function inlineResourceAliases(doc: YAML.Document, node: YAMLMap): void {
+  const resources = inlineAlias(doc, node.get('resources'));
+  if (resources !== node.get('resources')) node.set('resources', resources);
+  if (!isMap(resources)) return;
+  for (const pair of resources.items) {
+    pair.value = inlineAlias(doc, pair.value);
+  }
+}
+
+function syncRoleNode(doc: YAML.Document, node: YAMLMap, role: TeamRole): void {
+  // Leave a role that omits `description` alone unless it actually changes.
+  const currentDesc = node.has('description') ? node.get('description') : '';
+  if (currentDesc !== role.description) node.set('description', role.description);
+
+  const existingRes = node.get('resources');
+  const resMap: YAMLMap = isMap(existingRes) ? existingRes : new YAMLMap();
+  if (resMap !== existingRes) node.set('resources', resMap);
+
+  // Aliases were inlined already; drop the anchors so each list stands alone.
+  delete resMap.anchor;
+  for (const pair of resMap.items) {
+    if (isNode(pair.value)) delete pair.value.anchor;
+  }
+
+  for (const type of ROLE_RESOURCE_TYPES) {
+    const current = resMap.get(type);
+    const currentValues = isSeq(current) ? current.toJSON() : undefined;
+    if (Array.isArray(currentValues) && sameList(currentValues, role.resources[type])) continue;
+    const next = doc.createNode([...role.resources[type]]) as YAMLSeq;
+    if (isSeq(current)) {
+      next.flow = current.flow;
+      next.comment = current.comment;
+      next.commentBefore = current.commentBefore;
+    }
+    resMap.set(type, next);
+  }
+}
+
+/** Replace an alias node with a detached copy of what it points to; other nodes pass through. */
+function inlineAlias(doc: YAML.Document, value: unknown): unknown {
+  if (!isAlias(value)) return value;
+  const resolved = value.resolve(doc);
+  if (!resolved) return value;
+  const copy = doc.createNode(resolved.toJSON());
+  if ((isSeq(resolved) || isMap(resolved)) && (isSeq(copy) || isMap(copy))) copy.flow = resolved.flow;
+  return copy;
+}
+
+function sameList(a: unknown[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 export async function saveRolesManifest(repoPath: string, manifest: RolesManifest): Promise<void> {
   // Re-validate before writing to prevent persisting invalid manifests
   validateManifestShape(manifest);
@@ -116,7 +212,36 @@ export async function saveRolesManifest(repoPath: string, manifest: RolesManifes
   const manifestDir = path.join(repoPath, 'manifest');
   const manifestPath = path.join(manifestDir, 'roles.yaml');
   await ensureDir(manifestDir);
-  await writeFile(manifestPath, YAML.stringify(manifest));
+  const existing = await readFileSafe(manifestPath);
+  await writeFile(manifestPath, renderRolesManifest(manifest, existing));
+}
+
+export type RoleResourceEdit = { add?: string[]; remove?: string[] };
+
+/**
+ * Return a copy of `role` with the given per-type edits applied. Types without
+ * an edit keep their original array; edited types get a fresh array (add, then
+ * remove, deduplicated), so knowledge and skills are never the same object.
+ */
+export function applyRoleResourceEdits(
+  role: TeamRole,
+  edits: Partial<Record<RoleResourceType, RoleResourceEdit>>,
+): TeamRole {
+  const resources = { ...role.resources };
+  for (const type of ROLE_RESOURCE_TYPES) {
+    const edit = edits[type];
+    if (!edit) continue;
+    const next = [...role.resources[type]];
+    const seen = new Set(next);
+    for (const ns of edit.add ?? []) {
+      if (seen.has(ns)) continue;
+      seen.add(ns);
+      next.push(ns);
+    }
+    const toRemove = new Set(edit.remove ?? []);
+    resources[type] = next.filter((ns) => !toRemove.has(ns));
+  }
+  return { ...role, resources };
 }
 
 /**
