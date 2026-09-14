@@ -78,7 +78,19 @@ export type ToolPaths = Omit<WithoutNulls<ToolPathsInput>, 'userScope'> & {
  */
 export const DEFAULT_TOOL_PATHS: Readonly<Record<string, ToolPaths>> = {
   claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents', mcp: '.claude.json', mcpProject: '.mcp.json' },
-  codex: { skills: '.codex/skills', rules: '.codex/rules', settings: '.codex/hooks.json', agents: '.codex/agents', mcp: '.codex/config.toml' },
+  // Codex has no instructions rules dir: `.codex/rules/` holds Starlark command
+  // policies, and instructions come only from ~/.codex/AGENTS.md (global) and the
+  // AGENTS.md files from the repo root down (project). Team rules are inlined
+  // into a managed block (see resources/rules.ts); the project-root AGENTS.md is
+  // shared like ZCode's, so installation is gated on .codex/ there.
+  codex: {
+    skills: '.codex/skills',
+    settings: '.codex/hooks.json',
+    agents: '.codex/agents',
+    mcp: '.codex/config.toml',
+    claudemd: 'AGENTS.md',
+    userScope: { claudemd: '.codex/AGENTS.md' },
+  },
   'codex-internal': { skills: '.codex-internal/skills', rules: '.codex-internal/rules', settings: '.codex-internal/hooks.json', agents: '.codex-internal/agents' },
   'claude-internal': { skills: '.claude-internal/skills', rules: '.claude-internal/rules', settings: '.claude-internal/settings.json', claudemd: '.claude-internal/CLAUDE.md', agents: '.claude-internal/agents' },
   // tclaude ships Claude Code with `customUserDataDir: .tclaude`, which
@@ -145,8 +157,20 @@ export const DEFAULT_TOOL_PATHS: Readonly<Record<string, ToolPaths>> = {
   // User-scope MCP mirrors Claude's shape (`mcpServers` key) in
   // ~/.agents/mcp.json; project scope writes `mcp.servers` inside
   // .zcode/config.json (a different key), which the Claude writer cannot
-  // emit — so no mcpProject. ZCode has no user-level rules dir convention.
-  zcode: { skills: '.zcode/skills', agents: '.zcode/agents', settings: '.zcode/cli/config.json', mcp: '.agents/mcp.json' },
+  // emit — so no mcpProject. ZCode has no rules directory: it reads two
+  // instruction files, ~/.zcode/AGENTS.md (global) and <project>/AGENTS.md
+  // (workspace), and expands no @imports, so team rules are inlined into a
+  // managed block (see resources/rules.ts). The workspace-root AGENTS.md is
+  // shared with other tools (hermes, workbuddy, and Codex reads it natively),
+  // so installation is gated on .zcode/ and no recall block is written there.
+  zcode: {
+    skills: '.zcode/skills',
+    agents: '.zcode/agents',
+    settings: '.zcode/cli/config.json',
+    mcp: '.agents/mcp.json',
+    claudemd: 'AGENTS.md',
+    userScope: { claudemd: '.zcode/AGENTS.md' },
+  },
   // Oh My Pi (OMP): the config root is ~/.omp on every platform (no %APPDATA%
   // on Windows); user-scope resources live in the agent dir ~/.omp/agent/, a
   // different prefix from the project <root>/.omp/, hence userScope. Rules are
@@ -184,7 +208,8 @@ export const DEFAULT_TOOL_PATHS: Readonly<Record<string, ToolPaths>> = {
   // DeepSeek Harness: skills synced to ~/.dsh/skills, which its skill-filesystem
   // provider scans as user-dsh root (rank 400). dsh discovers both directory
   // bundles (<name>/SKILL.md) and flat Markdown files there natively.
-  dsh: { skills: '.dsh/skills' },
+  // Project instructions and team rules share the workspace-root AGENTS.md.
+  dsh: { skills: '.dsh/skills', claudemd: 'AGENTS.md' },
   workbuddy: { skills: '.workbuddy/skills', rules: '.workbuddy/rules', settings: '.workbuddy/settings.json', claudemd: 'AGENTS.md', mcp: '.workbuddy/mcp.json', mcpProject: '.workbuddy/mcp.json' },
   // OpenCode reads project config from <root>/.opencode/ but user config from
   // ~/.config/opencode/ — a different prefix, hence userScope. Skills are also

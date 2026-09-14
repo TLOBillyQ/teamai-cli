@@ -202,6 +202,20 @@ describe('TeamaiConfigSchema toolPaths merge over defaults', () => {
     });
   });
 
+  it('accepts a userScope claudemd override and merges it like the other fields', () => {
+    const result = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { codex: { userScope: { claudemd: '.codex/AGENTS.md' } } },
+    });
+    expect(result.toolPaths.codex.userScope).toEqual({ claudemd: '.codex/AGENTS.md' });
+
+    const removed = TeamaiConfigSchema.parse({
+      ...base,
+      toolPaths: { zcode: { userScope: { claudemd: false } } },
+    });
+    expect(removed.toolPaths.zcode).not.toHaveProperty('userScope');
+  });
+
   it('keeps a custom tool that is not in the defaults as written', () => {
     const result = TeamaiConfigSchema.parse({
       ...base,
