@@ -128,6 +128,7 @@ function spawnScript(
   const child = spawn(process.execPath, [scriptPath], {
     cwd: repoPath,
     stdio,
+    windowsHide: true,
     env: {
       ...process.env,
       TEAMAI_REPO: repoPath,

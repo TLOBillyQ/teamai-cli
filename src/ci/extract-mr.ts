@@ -77,8 +77,8 @@ async function configureGitUser(repoPath: string, provider: 'github' | 'tgit'): 
   }
 
   try {
-    execFileSync('git', ['config', 'user.name', name], { cwd: repoPath, stdio: 'ignore' });
-    execFileSync('git', ['config', 'user.email', email], { cwd: repoPath, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', name], { windowsHide: true, cwd: repoPath, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', email], { windowsHide: true, cwd: repoPath, stdio: 'ignore' });
     log.debug(`Git user: ${name} <${email}>`);
   } catch {
     log.debug('git config 失败（非 git 仓库），跳过');
@@ -253,7 +253,7 @@ export async function ciExtractMr(opts: CiExtractMrOptions): Promise<void> {
       try {
         const diffOutput = execFileSync(
           'git', args,
-          { cwd: businessRepo, encoding: 'utf-8', timeout: 10_000 },
+          { windowsHide: true, cwd: businessRepo, encoding: 'utf-8', timeout: 10_000 },
         );
         changedFiles = diffOutput.trim().split('\n')
           .filter(f => f && /\.(ts|tsx|js|jsx|py|go|rs|java)$/.test(f));

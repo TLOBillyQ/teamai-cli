@@ -193,8 +193,11 @@ async function buildHookChecks(
         const content = await readFileSafe(settingsPath);
         if (!content) return false;
 
+        // The Windows dispatch command names node + the entry script instead of
+        // the `teamai` bin (issue #43), so match on the subcommand plus its
+        // `--tool` argument instead of requiring the bin name.
         const missing = TEAMAI_HOOK_SUBCOMMANDS.filter(
-          (sub) => !content.includes(`teamai ${sub}`),
+          (sub) => !new RegExp(`${sub}\\s+[\\w-]+\\s+--tool\\b`).test(content),
         );
         return missing.length === 0;
       },
@@ -223,6 +226,7 @@ async function buildKimiHookChecks(
   if (!homeExists && !localConfig?.enabledAgents?.includes('kimi')) return [];
   return [{
     name: `teamai hooks in kimi config (${getKimiConfigPath()})`,
+    source: 'local',
     check: hasKimiTeamaiHooks,
     fix: homeExists
       ? 'Run `teamai hooks inject` to inject/update hooks'
@@ -243,7 +247,9 @@ async function hasInstalledCodexHooks(toolPaths: TeamaiConfig['toolPaths'], base
     const settingsPath = path.join(baseDir, paths.settings);
     if (!await pathExists(settingsPath)) continue;
     const content = await readFileSafe(settingsPath);
-    if (content?.includes('teamai hook-dispatch')) return true;
+    // The Windows form carries no `teamai` token (#43), so match the dispatch
+    // argument shape rather than the bin name.
+    if (content && /hook-dispatch\s+[\w-]+\s+--tool\b/.test(content)) return true;
   }
   return false;
 }
@@ -368,12 +374,14 @@ export async function buildChecks(ctx: DoctorContext, stage: CheckStage = 'docto
     checks.push(
       {
         name: 'Gitea instance URL is configured',
+        source: 'provider',
         check: async () => Boolean(process.env.GITEA_URL?.trim()),
         fix: 'Export GITEA_URL, e.g. https://gitea.example.com. Gitea has no public host, '
           + 'so the base URL is required for API access.',
       },
       {
         name: 'Gitea token is configured',
+        source: 'provider',
         check: async () => giteaIsAuthenticated(),
         fix: 'Export GITEA_TOKEN (a Gitea access token with repo scope). '
           + 'GITEA_ACCESS_TOKEN and GITEA_PAT are accepted as aliases.',
@@ -514,7 +522,6 @@ export async function doctor(options: DoctorOptions): Promise<boolean> {
     if (unrecognizedKeys.length > 0) {
       console.log(`  ⚠ teamai.yaml has keys this teamai version does not recognize (ignored): ${unrecognizedKeys.join(', ')}`);
     }
-  }
   }
 
   const results = await runChecks(await buildChecks(ctx), jsonMode ? undefined : renderResult);

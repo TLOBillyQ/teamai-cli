@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { GITLAB_HOST } from './repo-url.js';
 import { sanitizeGitUrl } from '../../utils/redact.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 
 /**
  * GitLab REST API client (API v4).
@@ -188,10 +189,14 @@ export function gitlabRepoClone(repo: string, localPath: string): void {
   args.push('clone', cloneUrl(repo), localPath);
 
   const result = spawnSync('git', args, {
+    windowsHide: true,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 120_000,
-    windowsHide: true,
+    // The token is ours, so a rejected one must not fall back to a credential
+    // prompt (see nonInteractiveGitEnv). Without a token this clone is anonymous
+    // and the user's own credential flow stays in charge.
+    env: token ? { ...process.env, ...nonInteractiveGitEnv() } : undefined,
   });
   const allOutput = `${result.stderr ?? ''} ${result.stdout ?? ''}`;
   if (result.status === 0) return;

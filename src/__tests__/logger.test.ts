@@ -174,6 +174,38 @@ describe('stderr-only mode (hook-dispatch path)', () => {
   });
 });
 
+describe('silent mode', () => {
+  it('suppresses info/success/warn', () => {
+    const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    setSilent(true);
+    log.info('i');
+    log.success('s');
+    log.warn('w');
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    stdoutSpy.mockRestore();
+  });
+
+  it('warnAlways still reaches the user under --silent (issue #44)', () => {
+    const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    setSilent(true);
+    log.warnAlways('trust your Codex hooks');
+    expect(String(stdoutSpy.mock.calls[0][0])).toContain('trust your Codex hooks');
+    stdoutSpy.mockRestore();
+  });
+
+  it('warnAlways follows the stderr-only routing of hook mode', () => {
+    const stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setSilent(true);
+    setStderrOnly(true);
+    log.warnAlways('keep stdout a clean JSON channel');
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    expect(String(stderrSpy.mock.calls[0][0])).toContain('keep stdout a clean JSON channel');
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+});
+
 describe('rotation', () => {
   it('rotates when file exceeds limit', () => {
     // Write 6MB to exceed 5MB limit

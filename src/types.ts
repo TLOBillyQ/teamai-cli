@@ -714,6 +714,12 @@ export const StateSchema = z.object({
    */
   coAuthorManaged: z.record(z.string(), z.boolean()).optional(),
   lastUpdateCheck: z.string().nullable().default(null),
+  /**
+   * When the last registry query *failed*. Kept apart from lastUpdateCheck so a
+   * failure only suppresses retries for FAILURE_BACKOFF_MS instead of hiding a
+   * real update for the full cache TTL (issue #43).
+   */
+  lastUpdateCheckFailure: z.string().nullable().optional(),
   availableUpdate: z.string().nullable().default(null),
 });
 

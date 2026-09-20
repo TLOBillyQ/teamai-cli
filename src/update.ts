@@ -34,6 +34,12 @@ const AGENT_REGISTRY = 'http://lzxsvn:3000/api/packages/agent/npm/';
 const VERSION_CHECK_TIMEOUT = 5000;
 const INSTALL_TIMEOUT = 60000;
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+/**
+ * Cool-down after a failed registry query (issue #43). Without it every AI
+ * session retried an unreachable registry — one extra npm subprocess (and, on
+ * Windows, one more console window) per session, forever.
+ */
+const FAILURE_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -436,18 +442,29 @@ export async function checkForUpdate(options?: { force?: boolean }): Promise<Che
   const state = await loadState();
   const current = getCurrentVersion();
 
-  // Use cached result if valid
+  // Use cached result if valid. A cached "no update" (availableUpdate: null)
+  // counts too — re-querying the registry on every session was the whole cost
+  // this cache exists to avoid.
   if (!options?.force && isCacheValid(state.lastUpdateCheck)) {
-    if (state.availableUpdate) {
-      const cmp = compareVersions(current, state.availableUpdate);
-      return { available: cmp < 0, current, latest: state.availableUpdate };
-    }
+    const latest = state.availableUpdate ?? current;
+    return {
+      available: compareVersions(current, latest) < 0,
+      current,
+      latest,
+    };
+  }
+
+  // Stay quiet while a recent failure is still cooling down, so an
+  // unreachable registry is not retried once per session.
+  if (!options?.force && isCacheValid(state.lastUpdateCheckFailure ?? null, FAILURE_BACKOFF_MS)) {
+    log.debug('Version check skipped: previous check failed recently');
     return { available: false, current, latest: current };
   }
 
   // Fetch latest version from registry
   const latest = await fetchLatestVersion();
   if (!latest) {
+    await saveState({ ...state, lastUpdateCheckFailure: new Date().toISOString() });
     return { available: false, current, latest: current };
   }
 
@@ -456,6 +473,7 @@ export async function checkForUpdate(options?: { force?: boolean }): Promise<Che
   await saveState({
     ...state,
     lastUpdateCheck: new Date().toISOString(),
+    lastUpdateCheckFailure: null,
     availableUpdate: available ? latest : null,
   });
 
@@ -463,10 +481,12 @@ export async function checkForUpdate(options?: { force?: boolean }): Promise<Che
 }
 
 /**
- * Perform the actual update (check + install based on policy)
+ * Perform the actual update (check + install based on policy).
+ * `force` skips the cache and the failure backoff — used by the explicit
+ * `teamai update` command, which must never answer from a stale cache.
  */
-export async function doUpdate(): Promise<void> {
-  const result = await checkForUpdate();
+export async function doUpdate(options?: { force?: boolean }): Promise<void> {
+  const result = await checkForUpdate(options);
   if (!result.available) {
     log.info(`Already up to date (v${result.current})`);
     return;
@@ -565,10 +585,19 @@ export async function doUpdate(): Promise<void> {
       const refresh = entry
         ? { cmd: process.execPath, args: [entry, 'hooks', 'inject', '--silent'] }
         : { cmd: 'teamai', args: ['hooks', 'inject', '--silent'] };
-      await execFileAsync(refresh.cmd, refresh.args, {
-        timeout: 15_000,
+      const refreshResult = await execFileAsync(refresh.cmd, refresh.args, {
         windowsHide: true,
+        timeout: 15_000,
       });
+      // `--silent` mutes the child's progress lines but not everything it can
+      // say: the Codex hook trust reminder is emitted even then (issue #44), and
+      // execFile only buffers it. Forward what the child printed — a hook file
+      // rewritten by this upgrade must not sit at trust=modified with no hint.
+      // (execFile always pipes, so a stdio option has no effect; execCommand's
+      // `stream` would do this, but it resolves non-zero exits where this catch
+      // depends on a rejection.)
+      if (refreshResult.stdout) process.stdout.write(refreshResult.stdout);
+      if (refreshResult.stderr) process.stderr.write(refreshResult.stderr);
       log.success('Refreshed hooks with new version');
     } catch (e) {
       log.error(`Hook refresh after update skipped: ${(e as Error).message}`);
@@ -604,7 +633,7 @@ export interface UpdateOptions {
  */
 export async function update(options: UpdateOptions): Promise<void> {
   if (options.check) {
-    const result = await checkForUpdate();
+    const result = await checkForUpdate({ force: true });
     if (result.available) {
       log.info(`Update available: v${result.current} → v${result.latest}. Run "teamai update" to upgrade.`);
     } else {
@@ -613,5 +642,5 @@ export async function update(options: UpdateOptions): Promise<void> {
     return;
   }
 
-  await doUpdate();
+  await doUpdate({ force: true });
 }

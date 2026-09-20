@@ -462,6 +462,10 @@ export async function hookDispatchCli(
     // launch — its exit is what takes the host's job object down.
     await settling;
   } catch (e) {
-    log.warn(`hook-dispatch: unexpected error: ${e instanceof Error ? e.message : String(e)}`);
+    // Debug-log only: the POSIX hook command swallows output with `2>/dev/null`,
+    // but the Windows command runs node directly with no shell to redirect
+    // through (issue #43), so a warning here would surface in the host UI on
+    // every hook fire. The message still lands in ~/.teamai/debug.log.
+    log.debug(`hook-dispatch: unexpected error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }

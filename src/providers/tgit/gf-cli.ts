@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathExists, ensureDir } from '../../utils/fs.js';
 import { log, spinner } from '../../utils/logger.js';
 import { getTeamaiHomeDir } from '../../types.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 import { tgitFetch, tgitGitCloneUrl } from './rest-auth.js';
 
 /** Path where gf CLI is installed */
@@ -49,6 +50,7 @@ export function gfExec(
 
   if (options?.inheritStdio) {
     const result = spawnSync('bash', ['-c', cmd], {
+      windowsHide: true,
       stdio: 'inherit',
       env: { ...process.env },
       cwd: options.cwd,
@@ -57,6 +59,7 @@ export function gfExec(
   }
 
   const result = spawnSync('bash', ['-c', cmd], {
+    windowsHide: true,
     env: { ...process.env },
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
@@ -77,6 +80,7 @@ function getGfPath(): string {
   // Prefer our managed install
   try {
     const stat = execSync(`test -x "${gfBinPath()}" && echo ok`, {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -87,7 +91,7 @@ function getGfPath(): string {
 
   // Fall back to system PATH
   try {
-    const which = execSync('which gf', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const which = execSync('which gf', { windowsHide: true, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     if (which.trim()) return which.trim();
   } catch {
     // not in PATH
@@ -158,11 +162,11 @@ export async function ensureGfInstalled(): Promise<void> {
     // Download and extract tarball
     execSync(
       `curl -fsSL "${url}" | tar xz -C "${gfInstallDir()}"`,
-      { stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 },
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 },
     );
 
     // Verify installation
-    execSync(`test -x "${gfBinPath()}"`, { stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(`test -x "${gfBinPath()}"`, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 
     spin.succeed(`gf CLI installed to ${gfInstallDir()}`);
   } catch (e) {
@@ -352,10 +356,14 @@ export function gfRepoClone(repo: string, localPath: string): void {
   const cloneUrl = tgitGitCloneUrl(`https://git.woa.com/${repo}.git`);
   if (cloneUrl) {
     const result = spawnSync('git', ['clone', cloneUrl, localPath], {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 120_000,
-      windowsHide: true,
+      // The URL carries the OAuth token from `gf auth login`, so a rejected one
+      // must not fall back to a credential prompt (see nonInteractiveGitEnv). The
+      // `gf repo clone` fallback below keeps gf's own interactive flow.
+      env: { ...process.env, ...nonInteractiveGitEnv() },
     });
     const allOutput = `${result.stderr ?? ''} ${result.stdout ?? ''}`;
     if (gitOutputSaysRepoMissing(allOutput)) {

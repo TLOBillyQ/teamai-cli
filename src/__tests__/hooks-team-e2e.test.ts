@@ -93,6 +93,21 @@ describe('teamai hooks — unified A+B end-to-end', () => {
     expect(manifest.codex.map((r) => r.id)).toContain('lint');
   });
 
+  // The auto-update hook refresh runs exactly this command (`hooks inject
+  // --silent`), so the Codex reminder has to survive --silent here (#44).
+  it('prints the Codex trust reminder under --silent when it rewrote Codex hooks (#44)', async () => {
+    writeHooksYaml(TEAM_HOOK);
+
+    const first = await run(['hooks', 'inject', '--silent']);
+    expect(first.stdout).toContain('Codex');
+    expect(first.stdout).toMatch(/review\/trust|trust them/i);
+    expect(first.stdout).toContain('/hooks');
+
+    // No-op re-run: nothing changed, so nothing new needs trusting.
+    const second = await run(['hooks', 'inject', '--silent']);
+    expect(second.stdout).not.toContain('Codex');
+  });
+
   it('`hooks list` audits built-in and team hooks', async () => {
     writeHooksYaml(TEAM_HOOK);
     const { stdout } = await run(['hooks', 'list']);

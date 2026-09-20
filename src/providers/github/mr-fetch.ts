@@ -159,13 +159,13 @@ export async function fetchGitHubPR(url: string): Promise<MRData> {
   try {
     const viewOutput = execSync(
       `gh pr view ${number} --repo ${repoArg} --json title,body,author,mergedAt,commits`,
-      { maxBuffer: 10 * 1024 * 1024, encoding: 'utf8' },
+      { windowsHide: true, maxBuffer: 10 * 1024 * 1024, encoding: 'utf8' },
     );
     const prView = JSON.parse(viewOutput) as GhPRView;
 
     const rawDiff = execSync(
       `gh pr diff ${number} --repo ${repoArg}`,
-      { maxBuffer: 50 * 1024 * 1024, encoding: 'utf8' },
+      { windowsHide: true, maxBuffer: 50 * 1024 * 1024, encoding: 'utf8' },
     );
 
     return {

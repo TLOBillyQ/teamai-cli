@@ -5,11 +5,14 @@ import { spawnSync } from 'node:child_process';
 import fse from 'fs-extra';
 
 vi.mock('../utils/logger.js', () => ({
-  log: { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  log: { info: vi.fn(), success: vi.fn(), warn: vi.fn(), warnAlways: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { reconcileTeamHooksForConfig } from '../hooks.js';
+import { reconcileTeamHooksForConfig, injectHooks, removeHooks } from '../hooks.js';
+import { log } from '../utils/logger.js';
 import type { LocalConfig, TeamaiConfig } from '../types.js';
+
+const mockedLog = log as unknown as { warn: ReturnType<typeof vi.fn>; warnAlways: ReturnType<typeof vi.fn> };
 
 let project: string;
 let repo: string;
@@ -55,6 +58,7 @@ function manifest(): Promise<Record<string, Array<{ id: string }>>> {
 }
 
 beforeEach(async () => {
+  vi.clearAllMocks();
   project = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-recon-proj-'));
   repo = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-recon-repo-'));
   home = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-recon-home-'));
@@ -292,6 +296,89 @@ builtin:
     const projectClaude = await fse.readJson(path.join(project, '.claude', 'settings.json'));
     expect(projectClaude.hooks.SessionStart).toHaveLength(1);
     expect(await fse.pathExists(path.join(home, '.claude', 'settings.json'))).toBe(false);
+  });
+});
+
+// ── Codex trust reminder (#44) ───────────────────────────────
+//
+// Codex drops a hook to `trust=modified` as soon as its command text changes, so
+// the reminder must fire exactly when a pass rewrote the trust-gated Codex hooks
+// file — and never be silenced: the post-update refresh and the session-start
+// pull both reconcile with `silent: true`.
+describe('reconcileTeamHooksForConfig — Codex trust reminder (#44)', () => {
+  it('warns through warnAlways (not warn) when it rewrites the public Codex hooks', async () => {
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(mockedLog.warnAlways).toHaveBeenCalledTimes(1);
+    const reminder = String(mockedLog.warnAlways.mock.calls[0][0]);
+    expect(reminder).toContain('Codex');
+    expect(reminder).toMatch(/review\/trust|trust them/i);
+    expect(reminder).toContain('/hooks');
+    // warn() would be muted by --silent, which is how the gap survived (#44).
+    expect(mockedLog.warn).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet on a second, no-op pass — nothing new to trust', async () => {
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+    mockedLog.warnAlways.mockClear();
+
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(await codexSettings()).toHaveProperty('hooks');
+    expect(mockedLog.warnAlways).not.toHaveBeenCalled();
+  });
+
+  it('does not warn for the trust-gate-exempt Codex variants', async () => {
+    // codex-internal / tcodex share the hooks.json format but are not gated.
+    await fse.ensureDir(path.join(home, '.tcodex'));
+    const variants = { toolPaths: { tcodex: { settings: '.tcodex/hooks.json' } } } as unknown as TeamaiConfig;
+
+    await reconcileTeamHooksForConfig(variants, localConfig());
+
+    expect(await fse.readJson(path.join(home, '.tcodex', 'hooks.json'))).toHaveProperty('hooks');
+    expect(mockedLog.warnAlways).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when Codex is not installed (nothing was written)', async () => {
+    await fse.remove(path.join(home, '.codex'));
+
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+
+    expect(mockedLog.warnAlways).not.toHaveBeenCalled();
+  });
+
+  it('does not warn on removal — there is nothing left to trust', async () => {
+    await reconcileTeamHooksForConfig(teamConfig, localConfig());
+    mockedLog.warnAlways.mockClear();
+
+    await reconcileTeamHooksForConfig(teamConfig, localConfig(), { removeAll: true });
+
+    expect(mockedLog.warnAlways).not.toHaveBeenCalled();
+  });
+
+  // The reminder lives in reconcileHooks, the one place that knows the file was
+  // rewritten, so the built-in-only paths are covered too. pull's legacy-format
+  // migration (reinjectLegacyHooks) and the local-agent hook go through
+  // injectHooks rather than reconcileTeamHooksForConfig — the post-upgrade first
+  // pull is exactly those paths (#44).
+  it('warns on the built-in-only inject path pull\'s legacy migration uses', async () => {
+    const settingsPath = path.join(home, '.codex', 'hooks.json');
+
+    await injectHooks(settingsPath, 'codex');
+
+    expect(await codexSettings()).toHaveProperty('hooks');
+    expect(mockedLog.warnAlways).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet on a repeat built-in-only inject, and on built-in-only removal', async () => {
+    const settingsPath = path.join(home, '.codex', 'hooks.json');
+    await injectHooks(settingsPath, 'codex');
+    mockedLog.warnAlways.mockClear();
+
+    await injectHooks(settingsPath, 'codex');
+    await removeHooks(settingsPath, 'codex');
+
+    expect(mockedLog.warnAlways).not.toHaveBeenCalled();
   });
 });
 

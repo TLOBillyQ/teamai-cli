@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { RepoNotFoundError, type PrCreateOptions } from '../types.js';
 
 import { sanitizeGitUrl } from '../../utils/redact.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 import { giteaHost, parseGiteaRepoInput } from './repo-url.js';
 
 /**
@@ -186,9 +187,13 @@ export function giteaRepoClone(repo: string, localPath: string): void {
   args.push('clone', '--', remoteUrl, localPath);
 
   const result = spawnSync('git', args, {
+    windowsHide: true,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 120_000,
+    // The token is ours, so a rejected one must not fall back to a credential
+    // prompt (see nonInteractiveGitEnv); an anonymous clone keeps that flow.
+    env: token ? { ...process.env, ...nonInteractiveGitEnv() } : undefined,
   });
   if (result.status === 0) return;
 

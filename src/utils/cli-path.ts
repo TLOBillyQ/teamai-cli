@@ -54,6 +54,7 @@ export function pickWindowsCommand(whereOutput: string): string | null {
 function whereOnWindows(cmd: string): string | null {
   try {
     const out = execFileSync('where', [cmd], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false,
@@ -80,6 +81,7 @@ function whichOnPosix(cmd: string): string | null {
   // 策略 1：bash login shell（shell: false 是 execFileSync 默认行为，此处显式标注）
   try {
     const p = execFileSync('bash', ['-lc', `command -v ${cmd}`], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false,
@@ -93,6 +95,7 @@ function whichOnPosix(cmd: string): string | null {
   // 策略 2：zsh login shell（macOS 默认 shell / bash 不可用时）
   try {
     const p = execFileSync('zsh', ['-lc', `command -v ${cmd}`], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false,
@@ -106,6 +109,7 @@ function whichOnPosix(cmd: string): string | null {
   // 策略 3：which 命令（使用 process.env.PATH，覆盖 fish / CI 容器等环境）
   try {
     const p = execFileSync('which', [cmd], {
+      windowsHide: true,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: false,

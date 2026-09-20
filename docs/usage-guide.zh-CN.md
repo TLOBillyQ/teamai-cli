@@ -1359,9 +1359,9 @@ teamai hooks remove    # 移除
 
 inject 和 remove 只会操作你实际已安装的工具（即 `~/.<tool>/` 根目录已存在的工具）。对于 `toolPaths` 中已配置但未安装的工具，命令不会为其凭空创建根目录。
 
-在 Windows 上，经由 bash 执行的内置 hook 派发命令（如 Claude、Codex、Cursor、Copilot CLI）会以绝对路径引用 Git Bash——先查标准安装位置，再回退到 `HKLM\SOFTWARE\GitForWindows` 注册表——从而避免解析到 WSL 的 `bash.exe`；若找不到 Git Bash，则退回裸 `bash`。
+> **Windows** — hook 命令写成 `"<node.exe>" "<…>\dist\index.js" hook-dispatch …`，而非 POSIX 上的 `bash -lc "teamai hook-dispatch …"`。经由 npm 的 `teamai.cmd` shim 解析 `teamai` 会让每次 hook 多起一个 `bash` 和一个 `cmd.exe`，而 Windows 为控制台程序创建的窗口会在桌面上闪出黑窗。直接指定 node 与入口脚本可把这条链压到一个进程。Codex 通过 PowerShell 运行 hook（`pwsh -Command "<命令>"`），PowerShell 会把命令当作**脚本**解析，而以引号开头的脚本会直接报 `ParserError`（退出码 1），因此 Codex 是唯一带 PowerShell 调用运算符的工具：`& "<node.exe>" "<…>\dist\index.js" hook-dispatch …`。升级后请重新执行 `teamai hooks inject` 以改写已有条目。
 
-> **Codex 信任门槛** — Codex（OpenAI / ChatGPT Codex 应用，工具 id 为 `codex`）对非托管 hooks 设有显式的用户信任机制。teamai 写入 `~/.codex/hooks.json` 后，对于新增或变更的 hook，Codex 可能会跳过执行，直到你在 `/hooks` 或 Settings → Hooks 中 review/trust。当检测到 Codex hooks 已安装时，`teamai hooks inject` 与 `teamai doctor` 会输出提示；teamai 从不修改 Codex 的 `[hooks.state]` 来自动信任 —— 信任操作交由你手动完成。
+> **Codex 信任门槛** — Codex（OpenAI / ChatGPT Codex 应用，工具 id 为 `codex`）对非托管 hooks 设有显式的用户信任机制。teamai 写入 `~/.codex/hooks.json` 后，对于新增或变更的 hook，Codex 可能会跳过执行，直到你在 `/hooks` 或 Settings → Hooks 中 review/trust。每当 teamai 改写 Codex hooks 时都会输出该提示——`hooks inject`、`pull`、`init` 以及 `teamai update` 之后的 hook 刷新走的是同一条 reconcile 路径；该提示**不会**被 `--silent` 抑制，因为「改写」正是让 Codex 重新要求信任的动作。只要检测到 Codex hooks 已安装，`teamai doctor` 也会输出提示。teamai 从不修改 Codex 的 `[hooks.state]` 来自动信任 —— 信任操作交由你手动完成。
 
 ### 团队 Hooks 声明
 
@@ -1582,6 +1582,11 @@ pull 与 doctor 共用 skill 选择逻辑。所选分组或标签订阅中，如
 用户级 `updatePolicy` 始终优先于团队级 `autoUpdate`。
 
 在 Windows 上，更新检查、安装和 hooks 刷新均不会弹出命令行窗口。
+
+版本检查结果缓存在 `~/.teamai/state.json` 中 12 小时——"已是最新"也会被缓存，
+因此不会每个会话都去问一次 registry。检查**失败**（registry 不可达或配置错误）
+单独记录，最多每小时重试一次，避免 registry 挂掉时每个会话都白跑一个
+`npm view` 子进程。`teamai update` 无论是否处于退避窗口都会直接查询 registry。
 
 ### 使用统计上报
 

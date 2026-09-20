@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
 import { log, spinner } from '../../utils/logger.js';
 import { resolveCliPath } from '../../utils/cli-path.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -257,10 +258,14 @@ export function ghRepoClone(repo: string, localPath: string): void {
     : `https://github.com/${repo}.git`;
 
   const result = spawnSync('git', ['clone', cloneUrl, localPath], {
+    windowsHide: true,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 120_000,
-    windowsHide: true,
+    // The URL carries our token, so a rejected one must not fall back to a
+    // credential prompt (see nonInteractiveGitEnv); without a token the clone is
+    // anonymous and the user's own credential flow stays in charge.
+    env: token ? { ...process.env, ...nonInteractiveGitEnv() } : undefined,
   });
 
   const allOutput = `${result.stderr ?? ''} ${result.stdout ?? ''}`;

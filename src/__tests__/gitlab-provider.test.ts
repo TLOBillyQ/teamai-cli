@@ -45,6 +45,12 @@ import { GitLabProvider } from '../providers/gitlab/index.js';
 
 const mockedSpawnSync = spawnSync as Mock;
 
+/** The env the last mocked spawnSync call was given (undefined = inherit ours). */
+function spawnEnv(): NodeJS.ProcessEnv | undefined {
+  const options = mockedSpawnSync.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+  return options?.env;
+}
+
 // ─── repo-url parsing ───────────────────────────────────
 
 describe('parseGitLabRepoInput', () => {
@@ -233,6 +239,16 @@ describe('gitlabRepoClone', () => {
     expect(cloneUrlArg).not.toContain('oauth2:');
     // And the raw token must not appear in any argument.
     expect(args.some((a) => a.includes('glpat_secret'))).toBe(false);
+
+    // Our own token failing must not open a credential prompt: a login dialog
+    // cannot supply a PAT. GIT_TERMINAL_PROMPT only covers git's terminal prompt,
+    // so the helper list is reset for this spawn (see utils/git-env.ts).
+    expect(spawnEnv()).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: '',
+    });
   });
 
   it('clones anonymously (no auth header) when no token is set', () => {
@@ -244,6 +260,9 @@ describe('gitlabRepoClone', () => {
     const args = mockedSpawnSync.mock.calls[0][1] as string[];
     expect(args[0]).toBe('clone');
     expect(args.some((a) => a.includes('http.extraHeader'))).toBe(false);
+    // Without a token this clone is anonymous, so the user's own credential flow
+    // (helper, askpass, prompt) stays in charge.
+    expect(spawnEnv()).toBeUndefined();
   });
 
   it('sanitizes credentials from error output via the shared helper', () => {

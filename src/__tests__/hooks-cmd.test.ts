@@ -15,9 +15,6 @@ vi.mock('../hooks.js', async () => {
         reconcileHooksToAllTools: vi.fn(),
         reconcileTeamHooksForConfig: vi.fn(),
         sweepLegacyProjectHooks: vi.fn(),
-        hasInstalledCodexTrustGatedTool: vi.fn(),
-        // Keep the real reminder text so assertions verify the actual wording.
-        codexTrustReminder: actual.codexTrustReminder,
     };
 });
 
@@ -30,6 +27,7 @@ vi.mock('../utils/logger.js', () => ({
         info: vi.fn(),
         success: vi.fn(),
         warn: vi.fn(),
+        warnAlways: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
     },
@@ -38,7 +36,7 @@ vi.mock('../utils/logger.js', () => ({
 // ── Imports (after mocks) ────────────────────────────────
 
 import { autoDetectInit } from '../config.js';
-import { getHookStatus, reconcileHooks, reconcileHooksToAllTools, reconcileTeamHooksForConfig, sweepLegacyProjectHooks, hasInstalledCodexTrustGatedTool } from '../hooks.js';
+import { getHookStatus, reconcileHooks, reconcileHooksToAllTools, reconcileTeamHooksForConfig, sweepLegacyProjectHooks } from '../hooks.js';
 import { parseTeamHooks } from '../resources/hooks.js';
 import { log } from '../utils/logger.js';
 import { hooksInject, hooksRemove, hooksList } from '../hooks-cmd.js';
@@ -49,7 +47,6 @@ const mockedSweep = sweepLegacyProjectHooks as Mock;
 const mockedReconcileStandalone = reconcileHooks as Mock;
 const mockedReconcile = reconcileHooksToAllTools as Mock;
 const mockedReconcileForConfig = reconcileTeamHooksForConfig as Mock;
-const mockedHasCodexTrustGated = hasInstalledCodexTrustGatedTool as Mock;
 const mockedParseTeamHooks = parseTeamHooks as Mock;
 const mockedLog = log as unknown as { info: Mock; success: Mock; warn: Mock; error: Mock; debug: Mock };
 
@@ -100,7 +97,6 @@ beforeEach(() => {
     mockedReconcileStandalone.mockResolvedValue(undefined);
     mockedReconcile.mockResolvedValue(undefined);
     mockedReconcileForConfig.mockResolvedValue(undefined);
-    mockedHasCodexTrustGated.mockResolvedValue(false);
     mockedParseTeamHooks.mockResolvedValue(TEAM_DEFS);
 });
 
@@ -128,26 +124,11 @@ describe('hooksInject', () => {
         expect(mockedLog.success).not.toHaveBeenCalled();
     });
 
-    it('warns to trust Codex hooks when the public Codex is installed', async () => {
-        mockedHasCodexTrustGated.mockResolvedValue(true);
+    // The Codex trust reminder moved into the shared reconcile (#44) so pull and
+    // init emit it too; its gating is covered in hooks-reconcile-scope.test.ts.
+    it('leaves the Codex trust reminder to the shared reconcile', async () => {
         await hooksInject({});
-        expect(mockedLog.success).toHaveBeenCalledWith(expect.stringContaining('Hooks injected'));
-        const warned = mockedLog.warn.mock.calls.map((c) => String(c[0])).join('\n');
-        expect(warned).toContain('Codex');
-        expect(warned).toMatch(/review\/trust|trust them/i);
-        expect(warned).toContain('/hooks');
-    });
-
-    it('does not warn about Codex trust when no trust-gated Codex is installed', async () => {
-        mockedHasCodexTrustGated.mockResolvedValue(false);
-        await hooksInject({});
-        expect(mockedLog.warn).not.toHaveBeenCalled();
-    });
-
-    it('suppresses the Codex trust reminder with --silent', async () => {
-        mockedHasCodexTrustGated.mockResolvedValue(true);
-        await hooksInject({ silent: true });
-        expect(mockedLog.success).not.toHaveBeenCalled();
+        expect(mockedReconcileForConfig).toHaveBeenCalledTimes(1);
         expect(mockedLog.warn).not.toHaveBeenCalled();
     });
 

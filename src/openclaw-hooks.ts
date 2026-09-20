@@ -85,6 +85,7 @@ export default async function handler(ctx: { event?: string } = {}): Promise<voi
   if (!dispatchEvent) return;
   try {
     const child = spawn('teamai', ['hook-dispatch', dispatchEvent, '--tool', TOOL], {
+      windowsHide: true,
       stdio: ['inherit', 'ignore', 'ignore'],
     });
     child.on('error', () => {});
@@ -210,6 +211,7 @@ function buildAgentHandlerTs(command: string, timeout: number): string {
     `export default async function handler(): Promise<void> {`,
     '  try {',
     `    const child = spawn('sh', ['-c', ${JSON.stringify(command)}], {`,
+    `      windowsHide: true,`,
     `      stdio: ['inherit', 'ignore', 'ignore'],`,
     `      timeout: ${timeoutMs},`,
     '    });',

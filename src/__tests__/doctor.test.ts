@@ -73,20 +73,22 @@ const mockTeamConfig = {
     },
 };
 
+// A real dispatch command always carries the event and `--tool`, which is what
+// the doctor check matches on (#43) — keep the fixtures in that shape.
+function hookCommandLine(sub: string): string {
+    return `"command": "bash -lc \\"teamai ${sub} stop --tool claude\\""`;
+}
+
 // Build a settings content that contains all subcommands
 function buildFullHooksContent(): string {
-    const lines = TEAMAI_HOOK_SUBCOMMANDS.map(
-        (sub) => `"command": "bash -lc \\"teamai ${sub}\\""`,
-    );
+    const lines = TEAMAI_HOOK_SUBCOMMANDS.map(hookCommandLine);
     return `{ "hooks": { ${lines.join(', ')} } }`;
 }
 
 // Build a settings content that is missing some subcommands
 function buildPartialHooksContent(exclude: string[]): string {
     const subs = TEAMAI_HOOK_SUBCOMMANDS.filter((s) => !exclude.includes(s));
-    const lines = subs.map(
-        (sub) => `"command": "bash -lc \\"teamai ${sub}\\""`,
-    );
+    const lines = subs.map(hookCommandLine);
     return `{ "hooks": { ${lines.join(', ')} } }`;
 }
 
@@ -148,6 +150,24 @@ describe('doctor — hook checks', () => {
             expect.stringContaining('teamai hooks inject'),
         );
         expect(allPassed).toBe(false);
+    });
+
+    // Issue #43: the Windows dispatch command runs the entry script by absolute
+    // path, so the settings file carries `hook-dispatch` without a `teamai ` prefix.
+    it('recognizes the Windows dispatch command (node + entry script, no `teamai` token)', async () => {
+        mockedReadFileSafe.mockImplementation(async (filePath: string) => {
+            if (filePath.includes('settings.json')) {
+                return '{ "hooks": { "command": "\\"C:\\\\nodejs\\\\node.exe\\" \\"C:\\\\npm\\\\teamai-cli\\\\dist\\\\index.js\\" hook-dispatch stop --tool claude" } }';
+            }
+            if (filePath.includes('.zshrc') || filePath.includes('.bashrc')) {
+                return '# [teamai:env:start]';
+            }
+            return null;
+        });
+
+        await doctor({});
+
+        expect(hookCheckLine()).toContain('✔');
     });
 
     it('should fail when settings file does not exist', async () => {
@@ -217,7 +237,7 @@ describe('doctor — hook checks', () => {
     });
 
     it('checks standalone Copilot hooks under COPILOT_HOME', async () => {
-        const copilotHome = '/tmp/teamai-doctor-copilot';
+        const copilotHome = path.resolve('/tmp/teamai-doctor-copilot');
         const originalCopilotHome = process.env.COPILOT_HOME;
         process.env.COPILOT_HOME = copilotHome;
         mockedLoadLocalConfig.mockResolvedValue({
@@ -286,7 +306,7 @@ describe('doctor — hook checks', () => {
 
     it('does not infer project Copilot installation from .github/hooks alone', async () => {
         const projectRoot = '/tmp/teamai-doctor-unselected-copilot';
-        const copilotHome = '/tmp/teamai-doctor-unselected-home';
+        const copilotHome = path.resolve('/tmp/teamai-doctor-unselected-home');
         const originalCopilotHome = process.env.COPILOT_HOME;
         process.env.COPILOT_HOME = copilotHome;
         mockedLoadLocalConfig.mockResolvedValue({
@@ -703,7 +723,7 @@ describe('buildChecks — a tool enabled but not installed', () => {
 describe('doctor — unrecognized teamai.yaml keys', () => {
     function withTeamaiYaml(content: string): void {
         mockedReadFileSafe.mockImplementation(async (filePath: string) => {
-            if (filePath === '/tmp/repo/teamai.yaml') return content;
+            if (filePath === path.join('/tmp/repo', 'teamai.yaml')) return content;
             if (filePath.includes('settings.json')) return buildFullHooksContent();
             if (filePath.includes('.zshrc') || filePath.includes('.bashrc')) return '# [teamai:env:start]';
             return null;
@@ -755,7 +775,7 @@ describe('doctor — unrecognized teamai.yaml keys', () => {
 });
 
 describe('doctor — kimi hook check (issue #12)', () => {
-    const kimiHome = '/tmp/teamai-doctor-kimi-home';
+    const kimiHome = path.resolve('/tmp/teamai-doctor-kimi-home');
     const kimiTeamConfig = {
         ...mockTeamConfig,
         toolPaths: { ...mockTeamConfig.toolPaths, kimi: { skills: '.kimi-code/skills' } },

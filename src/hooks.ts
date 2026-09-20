@@ -196,7 +196,8 @@ const CODEX_TRUST_GATE_TOOLS = new Set(['codex']);
 /**
  * True for a tool that gates hooks behind an explicit user trust step (only the
  * public `codex`). teamai never edits Codex's `[hooks.state]` to auto-trust —
- * the reminder is UX only. Exported so `hooks inject` / `doctor` can surface it.
+ * the reminder is UX only. Used by the hook reconcile (which rewrites the file)
+ * and by `doctor` (which only reports).
  */
 export function isCodexTrustGatedTool(tool: string): boolean {
   return CODEX_TRUST_GATE_TOOLS.has(tool);
@@ -204,7 +205,7 @@ export function isCodexTrustGatedTool(tool: string): boolean {
 
 /**
  * One-line reminder that Codex may require the user to trust newly written hooks
- * before they run. Shared by `hooks inject` (post-write notice) and `doctor`
+ * before they run. Shared by the hook reconcile (post-write notice) and `doctor`
  * (installed-hooks note) so the wording stays identical.
  */
 export function codexTrustReminder(): string {
@@ -217,13 +218,34 @@ const TEAMAI_COMMAND_MARKERS = [
   'teamai auto-recall', 'teamai todowrite-hint', 'teamai mr-hint', 'teamai hook-dispatch',
 ];
 
+/**
+ * The dispatch invocation without a `teamai` token: the Windows command runs
+ * the entry script by absolute path, so the bin name never appears (issue #43).
+ * Anchored on the full `hook-dispatch <event> --tool` argument shape rather
+ * than the bare word, so a foreign hook that merely mentions `hook-dispatch`
+ * is never claimed (and therefore never pruned) as ours.
+ */
+const TEAMAI_DISPATCH_PATTERN = /hook-dispatch\s+[\w-]+\s+--tool\b/;
+
+/** True if a hook command carries one of the teamai ownership markers. */
+function hasTeamaiMarker(command: string): boolean {
+  return TEAMAI_COMMAND_MARKERS.some((marker) => command.includes(marker))
+    || TEAMAI_DISPATCH_PATTERN.test(command);
+}
+
 function extractTeamaiSubcommand(command: string): string | null {
   const match = command.match(/teamai\s+([\w-]+)/);
   return match ? match[1] : null;
 }
 
-function isTeamaiHookCommand(command: string): boolean {
-  return /(?:^|"|\s)teamai\s/.test(command);
+/**
+ * True for hook commands teamai owns. Matches both the POSIX form (a bare
+ * `teamai` token) and the Windows form, which spells out node + the entry
+ * script and therefore only carries the `hook-dispatch` subcommand.
+ * Exported for tests.
+ */
+export function isTeamaiHookCommand(command: string): boolean {
+  return /(?:^|"|\s)teamai\s/.test(command) || TEAMAI_DISPATCH_PATTERN.test(command);
 }
 
 /** Filter team defs down to those that apply to the given tool. */
@@ -410,9 +432,10 @@ function toCodexEntry(def: HookDef): CodexHookMatcher {
   return entry;
 }
 
-// getDispatchCommand() prefixes the launcher with a quoted, forward-slash Git
-// Bash path on Windows and keeps bare `bash` everywhere else (and on Windows
-// machines where Git Bash cannot be found).
+// Built-in Copilot commands come from getCopilotDispatchCommand() (the
+// upstream bash-wrapper form, with a quoted Git Bash path on Windows) and
+// always match this regex; anything else (e.g. team hooks) falls through and
+// keeps the same string for its powershell field.
 const COPILOT_BUILTIN_COMMAND_RE = /^("[^"]+"|bash) -lc "(teamai hook-dispatch [^"]+) 2>\/dev\/null" \|\| true$/;
 
 /** Render a valid PowerShell equivalent for TeamAI's generated bash wrapper. */
@@ -538,7 +561,7 @@ function isBuiltinClaudeEntry(entry: HookMatcher): boolean {
   const desc = entry.description ?? '';
   if (desc.startsWith(TEAMAI_HOOK_DESCRIPTION_PREFIX + ' ') || desc === TEAMAI_HOOK_DESCRIPTION_PREFIX) return true;
   const cmd = entry.hooks?.[0]?.command ?? '';
-  return TEAMAI_COMMAND_MARKERS.some((marker) => cmd.includes(marker));
+  return hasTeamaiMarker(cmd);
 }
 
 /** True if a settings entry is a teamai team (B) hook. */
@@ -564,7 +587,7 @@ async function reconcileClaudeFormat(
   teamActive: boolean,
   desiredTeamCommands: Set<string>,
   priorTeamCommands: Set<string>,
-): Promise<void> {
+): Promise<boolean> {
   // Built-in management never removes team hooks; team hooks are reconciled only
   // when a team pass is active (manifest present). This keeps the builtin-only
   // refresh path (injectHooks / autoMigrate) non-destructive to team hooks (§5).
@@ -630,6 +653,7 @@ async function reconcileClaudeFormat(
   } else {
     log.debug(`teamai hooks already up-to-date in ${settingsPath}`);
   }
+  return changed;
 }
 
 // ─── Cursor (hooks.json) reconcile ──────────────────────────
@@ -640,7 +664,7 @@ async function reconcileCursorFormat(
   teamDefs: HookDef[],
   opts: ReconcileHooksOptions,
   priorTeamCommands: Set<string>,
-): Promise<void> {
+): Promise<boolean> {
   const expanded = expandHome(hooksPath);
   await ensureDir(path.dirname(expanded));
   const hooksJson: CursorHooksJson = (await readJson<CursorHooksJson>(expanded)) ?? { version: 1, hooks: {} };
@@ -697,6 +721,7 @@ async function reconcileCursorFormat(
   } else {
     log.debug(`teamai hooks already up-to-date in ${hooksPath}`);
   }
+  return changed;
 }
 
 // ─── GitHub Copilot CLI (standalone hooks/*.json) reconcile ──
@@ -776,7 +801,7 @@ async function reconcileCodexFormat(
   teamDefs: HookDef[],
   opts: ReconcileHooksOptions,
   priorTeamCommands: Set<string>,
-): Promise<void> {
+): Promise<boolean> {
   const expanded = expandHome(hooksPath);
   await ensureDir(path.dirname(expanded));
   const hooksJson: CodexHooksJson = (await readJson<CodexHooksJson>(expanded)) ?? {};
@@ -784,7 +809,7 @@ async function reconcileCodexFormat(
 
   const isManaged = (entry: CodexHookMatcher): boolean => {
     const cmd = entry.hooks?.[0]?.command ?? '';
-    return TEAMAI_COMMAND_MARKERS.some((marker) => cmd.includes(marker)) || priorTeamCommands.has(cmd);
+    return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
   };
 
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
@@ -809,6 +834,7 @@ async function reconcileCodexFormat(
   } else {
     log.debug(`teamai hooks already up-to-date in ${hooksPath}`);
   }
+  return changed;
 }
 
 // ─── ZCode (~/.zcode/cli/config.json) reconcile ─────────────
@@ -819,7 +845,7 @@ async function reconcileZcodeFormat(
   teamDefs: HookDef[],
   opts: ReconcileHooksOptions,
   priorTeamCommands: Set<string>,
-): Promise<void> {
+): Promise<boolean> {
   const expanded = expandHome(settingsPath);
   await ensureDir(path.dirname(expanded));
   const vbsPath = path.join(path.dirname(expanded), 'teamai-hook-dispatch.vbs');
@@ -881,7 +907,7 @@ async function reconcileZcodeFormat(
   // same strategy as the Codex format.
   const isManaged = (entry: ZcodeHookMatcher): boolean => {
     const cmd = zcodeEntryCommand(entry);
-    return TEAMAI_COMMAND_MARKERS.some((marker) => cmd.includes(marker)) || priorTeamCommands.has(cmd);
+    return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
   };
 
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
@@ -906,6 +932,7 @@ async function reconcileZcodeFormat(
   } else {
     log.debug(`teamai hooks already up-to-date in ${settingsPath}`);
   }
+  return changed;
 }
 
 // ─── Agent hooks (HTTP-source, issue #238) ──────────────────
@@ -1084,6 +1111,13 @@ export async function removeAgentHook(
 /**
  * Reconcile a single tool settings/hooks file to the desired teamai hook set
  * (built-in A + supplied team B defs). Idempotent; only writes on change.
+ *
+ * This is also the one place that knows a tool's hooks file was *rewritten*, so
+ * it is where the Codex trust reminder is emitted (issue #44): the rewrite
+ * invalidates the trust Codex placed on the previous command text, and every
+ * path that writes hooks funnels through here — `hooks inject`, `pull` (both its
+ * reconcile and its legacy-format migration), `init`, bootstrap, the local-agent
+ * hook, and the post-update refresh — so no caller can miss it or drift.
  */
 export async function reconcileHooks(
   settingsPath: string,
@@ -1102,16 +1136,20 @@ export async function reconcileHooks(
   const desiredTeamCommands = new Set(scopedDefs.filter((d) => !d.tools || d.tools.includes(tool)).map((d) => d.command));
 
   const format = detectFormat(tool);
+  // Only the Codex-trust reminder below reads `rewritten`, and it fires for
+  // Codex-format tools alone — formats whose reconcile returns void (copilot)
+  // leave it false.
+  let rewritten = false;
   if (format === 'cursor') {
-    await reconcileCursorFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
+    rewritten = await reconcileCursorFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else if (format === 'copilot') {
     await reconcileCopilotFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else if (format === 'codex') {
-    await reconcileCodexFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
+    rewritten = await reconcileCodexFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else if (format === 'zcode') {
-    await reconcileZcodeFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
+    rewritten = await reconcileZcodeFormat(settingsPath, tool, scopedDefs, opts, priorTeamCommands);
   } else {
-    await reconcileClaudeFormat(settingsPath, tool, scopedDefs, {
+    rewritten = await reconcileClaudeFormat(settingsPath, tool, scopedDefs, {
       ...opts,
       // In a shared HOME settings file, only remove team entries belonging to
       // this project. User-scope installs retain the historical marker sweep.
@@ -1138,6 +1176,14 @@ export async function reconcileHooks(
       manifest[tool] = nextRecords;
       await writeJson(expandHome(opts.manifestPath), manifest);
     }
+  }
+
+  // Fires only on a real rewrite: an unchanged pass leaves Codex's existing trust
+  // intact, and removal leaves nothing to trust. warnAlways, not warn — the paths
+  // that rewrite hooks after an upgrade run silent, and that silence is the gap
+  // #44 is about. teamai never edits Codex's `[hooks.state]` to auto-trust.
+  if (rewritten && !opts.removeAll && isCodexTrustGatedTool(tool)) {
+    log.warnAlways(codexTrustReminder());
   }
 }
 
@@ -1279,7 +1325,7 @@ export async function hasTeamaiHooks(
     return Object.values(j.hooks).some((entries) =>
       (entries ?? []).some((e) => {
         const cmd = e.hooks?.[0]?.command ?? '';
-        return TEAMAI_COMMAND_MARKERS.some((m) => cmd.includes(m)) || priorTeamCommands.has(cmd);
+        return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
       }),
     );
   }
@@ -1291,7 +1337,7 @@ export async function hasTeamaiHooks(
     return Object.values(eventsMap).some((entries) =>
       (entries ?? []).some((e) => {
         const cmd = zcodeEntryCommand(e);
-        return TEAMAI_COMMAND_MARKERS.some((m) => cmd.includes(m)) || priorTeamCommands.has(cmd);
+        return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
       }),
     );
   }
@@ -1574,28 +1620,6 @@ export async function reconcileHooksToAllTools(
       log.warn(`Failed to reconcile hooks for ${tool}: ${(e as Error).message}`);
     }
   }
-}
-
-/**
- * True if a trust-gated Codex tool (the public `codex`) is both configured with
- * a settings path and actually installed on disk under baseDir.
- *
- * "Installed" uses the same root-directory gate as reconcileHooksToAllTools, so
- * a true result means inject just wrote hooks that Codex may require the user to
- * trust. Internal variants (codex-internal / tcodex) are excluded — they share
- * the format but not the trust gate. Used to decide whether to print the
- * reminder after inject.
- */
-export async function hasInstalledCodexTrustGatedTool(
-  toolPaths: Record<string, { settings?: string }>,
-  baseDir: string,
-): Promise<boolean> {
-  for (const [tool, paths] of Object.entries(toolPaths)) {
-    if (!isCodexTrustGatedTool(tool) || !paths.settings) continue;
-    const toolRoot = path.join(baseDir, paths.settings.split('/')[0]);
-    if (await pathExists(toolRoot)) return true;
-  }
-  return false;
 }
 
 /**

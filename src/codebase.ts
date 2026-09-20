@@ -65,7 +65,7 @@ async function gatherRepoContext(repoPath: string): Promise<string> {
         ' -not -path "*/dist/*"' +
         ' -not -path "*/.claude/worktrees/*"' +
         ' -not -name "*.js.map"',
-      { cwd: repoPath, encoding: 'utf-8' },
+      { windowsHide: true, cwd: repoPath, encoding: 'utf-8' },
     );
     const truncated =
       rawTree.length > FILE_TREE_MAX_CHARS

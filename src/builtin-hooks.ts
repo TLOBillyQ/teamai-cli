@@ -252,11 +252,11 @@ export function findGitBashWindows(
 let _winBashLauncherCache: string | undefined;
 
 /**
- * The shell word to emit in a rendered hook command. POSIX keeps the bare
- * `bash`; Windows substitutes the resolved Git Bash path (quoted, forward
+ * The shell word to emit in a rendered Copilot hook command. POSIX keeps the
+ * bare `bash`; Windows substitutes the resolved Git Bash path (quoted, forward
  * slashes so it stays JSON-safe — the default install location contains a
  * space) so the command never reaches the WSL launcher. Falls back to
- * plain `bash` only when Git is absent — there the old form was already
+ * plain `bash` only when Git is not found — there the old form was already
  * dead anyway.
  */
 function getHookShellCommand(): string {
@@ -267,17 +267,71 @@ function getHookShellCommand(): string {
       _winBashLauncherCache = `"${found.split(path.sep).join('/')}"`;
     } else {
       _winBashLauncherCache = 'bash';
-      log.debug('teamai hooks: Git Bash not found on this Windows machine; hook commands keep bare `bash` and may resolve to the WSL launcher.');
+      log.debug('teamai hooks: Git Bash not found on this Windows machine; Copilot hook commands keep bare `bash` and may resolve to the WSL launcher.');
     }
   }
   return _winBashLauncherCache;
 }
 
-/** Generate the hook-dispatch command for a given event, tool, and optional matcher. */
-export function getDispatchCommand(event: string, tool: string, matcher?: string, binPath?: string): string {
-  const bin = binPath ?? 'teamai';
+/** Injectable environment for getDispatchCommand — tests drive the Windows form. */
+export interface DispatchCommandEnv {
+  platform?: NodeJS.Platform;
+  /** Resolved `dist/index.js`, or null when it cannot be located. */
+  entryScript?: string | null;
+  /** Node binary the host should run the entry script with. */
+  nodeBin?: string;
+}
+
+/**
+ * Tools whose Windows hook command is executed through PowerShell's `-Command`.
+ *
+ * Codex runs a hook by handing the command string to the session shell —
+ * `pwsh.exe -Command "<command>"` — and PowerShell parses that string as a
+ * *script*. A script cannot begin with a quoted string, so the
+ * `"<node>" "<entry>" …` form #43 introduced dies with `ParserError` (exit 1)
+ * before the hook runs: every built-in hook fails on every event (issue #44).
+ * Prefixing the call operator `&` keeps the same single-process invocation and
+ * parses. `&` is PowerShell-only syntax, and the other tools' Windows hook
+ * shell is unverified, so this is deliberately scoped to the public `codex`.
+ */
+const POWERSHELL_COMMAND_TOOLS = new Set(['codex']);
+
+/**
+ * Generate the hook-dispatch command for a given event, tool, and optional matcher.
+ *
+ * On Windows the command names node and the entry script directly. The POSIX
+ * form (`bash -lc "teamai …"`) resolves `teamai` through npm's `teamai.cmd`
+ * shim, which adds a bash and a cmd.exe process to every hook invocation —
+ * console programs that flash a black window on the desktop (issue #43).
+ *
+ * The win32 branch is authoritative: it ignores `binPath` (a POSIX shell wrapper
+ * the platform would have to run through bash/cmd anyway) and never emits the
+ * POSIX form for this command. The wrapper/raw-command tools (WorkBuddy,
+ * CodeBuddy, ZCode) are rendered by their own helpers below and are unaffected.
+ */
+export function getDispatchCommand(
+  event: string,
+  tool: string,
+  matcher?: string,
+  binPath?: string,
+  env: DispatchCommandEnv = {},
+): string {
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
-  return `${getHookShellCommand()} -lc "${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
+  const dispatchArgs = `hook-dispatch ${event} --tool ${tool}${matcherArg}`;
+
+  if ((env.platform ?? process.platform) === 'win32') {
+    const entryScript = env.entryScript !== undefined ? env.entryScript : resolveTeamaiEntryScript();
+    const nodeBin = env.nodeBin ?? process.execPath;
+    // No entry script (exotic layout): fall back to the PATH lookup, still
+    // without the bash layer and still a bare command word, so a `-Command`
+    // shell parses it.
+    if (!entryScript) return `teamai ${dispatchArgs}`;
+    const callOperator = POWERSHELL_COMMAND_TOOLS.has(tool) ? '& ' : '';
+    return `${callOperator}"${nodeBin}" "${entryScript}" ${dispatchArgs}`;
+  }
+
+  const bin = binPath ?? 'teamai';
+  return `bash -lc "${bin} ${dispatchArgs} 2>/dev/null" || true`;
 }
 
 /**
@@ -327,6 +381,18 @@ function getCmdWrapperDispatchCommand(event: string, tool: string, matcher?: str
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
   const binDir = path.join(getUserHome(), TEAMAI_BIN_DIR);
   return `set "PATH=${binDir};%PATH%" && teamai hook-dispatch ${event} --tool ${tool}${matcherArg} 2>nul || exit /b 0`;
+}
+
+/**
+ * Upstream's bash-wrapper dispatch form (#639), kept for Copilot only: a
+ * Copilot hook entry carries bash/powershell/command triples that
+ * COPILOT_BUILTIN_COMMAND_RE in hooks.ts derives from this exact shape, and
+ * the fork's node-direct Windows form (#43/#44) has no PowerShell-parseable
+ * rendering there. Every other tool keeps the node-direct Windows form.
+ */
+function getCopilotDispatchCommand(event: string, tool: string, matcher?: string): string {
+  const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
+  return `${getHookShellCommand()} -lc "teamai hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
 }
 
 /** Canonical, ordered description of each built-in hook. Order is load-bearing
@@ -381,9 +447,11 @@ export function builtinHookDefs(tool: string): HookDef[] {
   const withTimeout = tool === 'cursor' || tool === 'copilot' || tool === 'workbuddy' || tool === 'codebuddy';
   const buildCommand = tool === 'zcode'
     ? getRawDispatchCommand
-    : WRAPPER_TOOLS.has(tool)
-      ? (toolUsesCmdShell(tool) ? getCmdWrapperDispatchCommand : getWrapperDispatchCommand)
-      : getDispatchCommand;
+    : tool === 'copilot'
+      ? getCopilotDispatchCommand
+      : WRAPPER_TOOLS.has(tool)
+        ? (toolUsesCmdShell(tool) ? getCmdWrapperDispatchCommand : getWrapperDispatchCommand)
+        : getDispatchCommand;
   const specs = tool === 'copilot'
     ? [...BUILTIN_HOOK_SPECS, COPILOT_SESSION_END_SPEC]
     : BUILTIN_HOOK_SPECS;
