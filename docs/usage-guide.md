@@ -1400,9 +1400,9 @@ teamai hooks remove    # Remove
 
 The inject and remove commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed.
 
-On Windows, the built-in hook dispatch commands that shell out through bash (e.g. Claude, Codex, Cursor, Copilot CLI) reference Git Bash by absolute path — standard install locations first, then the `HKLM\SOFTWARE\GitForWindows` registry as fallback — so they never resolve to the WSL `bash.exe` launcher; if Git Bash cannot be found they degrade to bare `bash`.
+> **Windows** — hook commands are written as `"<node.exe>" "<…>\dist\index.js" hook-dispatch …` instead of the POSIX `bash -lc "teamai hook-dispatch …"`. Resolving `teamai` through npm's `teamai.cmd` shim starts a `bash` and a `cmd.exe` process per hook, and every console process Windows has to create can flash a black window on the desktop. Naming node and the entry script directly cuts the chain to one process. Codex runs its hooks through PowerShell (`pwsh -Command "<command>"`), which parses the command as a *script* and refuses one whose first token is a quoted string (`ParserError`, exit 1), so Codex is the one tool whose command carries the PowerShell call operator: `& "<node.exe>" "<…>\dist\index.js" hook-dispatch …`. Re-run `teamai hooks inject` after upgrading to rewrite existing entries.
 
-> **Codex trust gate** — Codex (the OpenAI / ChatGPT Codex app, tool id `codex`) gates non-managed hooks behind an explicit user trust step. After teamai writes `~/.codex/hooks.json`, Codex may skip a newly added or changed hook until you review/trust it in `/hooks` or Settings → Hooks. `teamai hooks inject` and `teamai doctor` print a reminder when Codex hooks are installed; teamai never edits Codex's `[hooks.state]` to auto-trust — trusting is left to you.
+> **Codex trust gate** — Codex (the OpenAI / ChatGPT Codex app, tool id `codex`) gates non-managed hooks behind an explicit user trust step. After teamai writes `~/.codex/hooks.json`, Codex may skip a newly added or changed hook until you review/trust it in `/hooks` or Settings → Hooks. The reminder is printed whenever teamai rewrites Codex hooks — `hooks inject`, `pull`, `init`, and the hook refresh that `teamai update` runs are all the same reconcile — and it is *not* suppressed by `--silent`, since a rewrite is exactly what asks for trust again in Codex. `teamai doctor` prints it whenever Codex hooks are installed. teamai never edits Codex's `[hooks.state]` to auto-trust — trusting is left to you.
 
 ### Team Hooks Declaration
 
@@ -1623,6 +1623,13 @@ Auto-update runs in the Stop hook and is controlled by two tiers:
 The user-level `updatePolicy` always takes priority over the team-level `autoUpdate`.
 
 On Windows, the update check, installation, and hook refresh run without opening console windows.
+
+The version check is cached in `~/.teamai/state.json` for 12 hours — including a
+result of "already up to date", so an unchanged registry is not queried once per
+session. A *failed* check (unreachable or misconfigured registry) is recorded
+separately and retried at most once per hour, so a registry that is down does
+not cost every session an extra `npm view` subprocess. `teamai update` always
+queries the registry, backoff or not.
 
 ### Usage reporting
 

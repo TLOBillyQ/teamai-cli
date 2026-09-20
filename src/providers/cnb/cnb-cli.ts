@@ -2,6 +2,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import crossSpawn from 'cross-spawn';
 import { log, spinner } from '../../utils/logger.js';
 import { resolveCliPath } from '../../utils/cli-path.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 import type { RepoInfo } from '../types.js';
 import { OrganizationNotFoundError, RepoCreatePermissionError } from '../types.js';
 
@@ -103,7 +104,7 @@ export async function ensureCnbInstalled(): Promise<void> {
   }
   const spin = spinner('Installing cnb CLI (@cnbcool/cnb-cli)...').start();
   try {
-    execSync('npm install -g @cnbcool/cnb-cli', { stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 });
+    execSync('npm install -g @cnbcool/cnb-cli', { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 });
     if (!isCnbInstalled()) throw new Error('cnb not found on PATH after install');
     spin.succeed('cnb CLI installed');
   } catch (e) {
@@ -235,7 +236,16 @@ export function cnbRepoClone(repo: string, localPath: string): void {
   } else {
     args = ['-c', 'credential.helper=!cnb git-credential', 'clone', `https://${CNB_HOST}/${repo}.git`, localPath];
   }
-  const r = spawnSync('git', args, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000, windowsHide: true });
+  const r = spawnSync('git', args, {
+    windowsHide: true,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 120_000,
+    // The token is ours, so a rejected one must not fall back to a credential
+    // prompt (see nonInteractiveGitEnv). The interactive path below keeps the
+    // helper that the cloned repo then persists into its local config.
+    env: token ? { ...process.env, ...nonInteractiveGitEnv() } : undefined,
+  });
   const out = `${r.stderr ?? ''} ${r.stdout ?? ''}`;
   if (/not found|does not exist|Repository not found|404/i.test(out)) {
     throw new CnbRepoNotFoundError(repo);
@@ -250,10 +260,10 @@ export function cnbRepoClone(repo: string, localPath: string): void {
   // creds into remote.origin.url, so only the interactive path needs this.
   if (!token) {
     const cfg = spawnSync('git', ['config', '--local', 'credential.helper', '!cnb git-credential'], {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: localPath,
-      windowsHide: true,
     });
     if (cfg.status !== 0) {
       log.warn(`Could not persist CNB credential helper: ${(cfg.stderr ?? '').trim()}. Push/pull may prompt for credentials.`);

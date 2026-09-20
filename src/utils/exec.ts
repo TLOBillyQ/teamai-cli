@@ -27,11 +27,11 @@ export const execCommand: CommandExecutor = (
   options = {},
 ) => new Promise((resolve, reject) => {
   const child = spawn(command, args, {
+    windowsHide: true,
     cwd: options.cwd,
     env: options.env,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
-    windowsHide: true,
   });
 
   let stdout = '';

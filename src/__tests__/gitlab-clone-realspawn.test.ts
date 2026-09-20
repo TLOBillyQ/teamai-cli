@@ -2,43 +2,60 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-// NOTE: no vi.mock('node:child_process') here — this exercises a REAL git spawn
-// against a fake `git` on PATH, to verify the token never reaches the URL/argv
-// and that error output is sanitized end-to-end.
+// NOTE: no vi.mock('node:child_process') here — this file exercises a REAL git
+// spawn, and reads back what that process was handed from git's own trace2 log
+// (see the GIT_TRACE2_EVENT comment below). A PATH-injected fake `git` cannot
+// stand in for it on Windows: an extension-less shell script is not an executable
+// CreateProcess will start, and `spawnSync` refuses a `.cmd`/`.bat` shim with
+// EINVAL. A shim that silently fails to intercept is exactly how this test used
+// to clone gitlab.com for real.
 import { gitlabRepoClone } from '../providers/gitlab/gitlab-api.js';
+
+/** Nothing listens on 127.0.0.1:1, so the clone fails without touching the network. */
+const UNREACHABLE_PORT = 1;
+const TOKEN = 'glpat_e2e_secret';
 
 describe('gitlabRepoClone — real spawn (e2e)', () => {
   let tmp: string;
-  const origPath = process.env.PATH;
+  let traceFile: string;
   const origEnv = { ...process.env };
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-clone-e2e-'));
-    const bin = path.join(tmp, 'bin');
-    fs.mkdirSync(bin);
-    // Fake git: records its argv, then fails like a 403 with creds in the URL.
-    const fakeGit = path.join(bin, 'git');
-    fs.writeFileSync(
-      fakeGit,
-      [
-        '#!/bin/bash',
-        `printf '%s\\n' "$@" > "${path.join(tmp, 'argv.txt')}"`,
-        `echo "fatal: unable to access 'https://oauth2:glpat_e2e_secret@gitlab.example.com/org/repo.git/': The requested URL returned error: 403" >&2`,
-        'exit 128',
-      ].join('\n'),
-      { mode: 0o755 },
-    );
-    process.env.PATH = `${bin}:${origPath}`;
-    process.env.GITLAB_TOKEN = 'glpat_e2e_secret';
+    traceFile = path.join(tmp, 'trace.json');
+    // Test-local git config: a developer's proxy must not absorb the loopback
+    // clone (that would hang instead of failing), and no credential helper may
+    // answer it.
+    const gitConfig = path.join(tmp, 'gitconfig');
+    fs.writeFileSync(gitConfig, '[http]\n\tproxy =\n[credential]\n\thelper =\n');
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    process.env.GITLAB_URL = `http://127.0.0.1:${UNREACHABLE_PORT}`;
+    process.env.GITLAB_TOKEN = TOKEN;
+    // git records its own argv — `-c` options included — in this trace2 event log,
+    // which is what the assertions read. Unlike a fake git on PATH, the recorder
+    // cannot be bypassed silently: no log means no spawn, and the test fails.
+    process.env.GIT_TRACE2_EVENT = traceFile;
   });
 
   afterEach(() => {
-    process.env.PATH = origPath;
     process.env = { ...origEnv };
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('never passes the token in the clone URL/argv and sanitizes the error', () => {
+  /** argv of the top-level git process, as the real binary recorded it. */
+  function recordedArgv(): string[] {
+    const starts = fs
+      .readFileSync(traceFile, 'utf-8')
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as { event?: string; sid?: string; argv?: string[] })
+      // Children (git-remote-http, credential helpers) carry a "/"-suffixed sid.
+      .filter((event) => event.event === 'start' && event.argv && !event.sid?.includes('/'));
+    expect(starts.length, 'git recorded no start event — did a real git run?').toBe(1);
+    return starts[0].argv!;
+  }
+
+  it('never passes the token in the clone URL/argv and reports a clean error', () => {
     let err: Error | null = null;
     try {
       gitlabRepoClone('org/repo', path.join(tmp, 'dest'));
@@ -46,20 +63,28 @@ describe('gitlabRepoClone — real spawn (e2e)', () => {
       err = e as Error;
     }
 
-    // The real git argv, as the child process saw it.
-    const argv = fs.readFileSync(path.join(tmp, 'argv.txt'), 'utf-8').split('\n');
+    const argv = recordedArgv();
     const urlArg = argv.find((a) => a.endsWith('.git'));
-    expect(urlArg).toBeDefined();
-    // Token must NOT be embedded in the clone URL.
-    expect(urlArg).not.toContain('glpat_e2e_secret');
-    expect(urlArg).not.toContain('oauth2:');
-    // Token travels only inside the http.extraHeader arg (base64), never plaintext.
-    expect(argv.some((a) => a.includes('glpat_e2e_secret'))).toBe(false);
-    expect(argv.some((a) => a.startsWith('http.extraHeader=Authorization: Basic '))).toBe(true);
+    const expectedUrl = `http://127.0.0.1:${UNREACHABLE_PORT}/org/repo.git`;
+    expect(urlArg).toBe(expectedUrl);
 
-    // Error surfaced to the caller is sanitized.
+    // Token travels only inside the http.extraHeader arg (base64), never plaintext
+    // and never in the URL.
+    const headerArg = argv.find((a) => a.startsWith('http.extraHeader=Authorization: Basic '));
+    expect(headerArg).toBeDefined();
+    const decoded = Buffer.from(headerArg!.slice('http.extraHeader=Authorization: Basic '.length), 'base64').toString('utf-8');
+    expect(decoded).toBe(`oauth2:${TOKEN}`);
+    expect(urlArg).not.toContain(TOKEN);
+    expect(urlArg).not.toContain('oauth2:');
+    // git's record of every process it spawned holds the token nowhere in plaintext.
+    expect(fs.readFileSync(traceFile, 'utf-8')).not.toContain(TOKEN);
+
+    // The clone reached the endpoint, failed, and reported the failure with the
+    // URL that failed — no token, no credential prompt (the guard env and the
+    // provider's own suppression are what keep this run interactive-free).
     expect(err).not.toBeNull();
-    expect(err!.message).not.toContain('glpat_e2e_secret');
-    expect(err!.message).toContain('***@');
+    expect(err!.message).toContain('git clone failed:');
+    expect(err!.message).toContain(expectedUrl);
+    expect(err!.message).not.toContain(TOKEN);
   });
 });

@@ -111,6 +111,9 @@ describe('cnbRepoClone credential persistence', () => {
     expect(cloneCall[1]).toContain('credential.helper=!cnb git-credential');
     expect(cloneCall[1]).toContain('clone');
     expect(cloneCall[1]).toContain(`https://${CNB_HOST}/acme/harness.git`);
+    // No token of ours, so the helper keeps the interactive login (and its
+    // prompts) — that is the path this test exists for.
+    expect(cloneCall[2]?.env).toBeUndefined();
 
     // Second call: persist the helper into the repo's local config so later
     // push/pull auth without prompting. cwd must point at the clone.
@@ -131,6 +134,14 @@ describe('cnbRepoClone credential persistence', () => {
     const cloneCall = mockedSpawnSync.mock.calls[0];
     expect(cloneCall[1]).toContain(`clone`);
     expect(cloneCall[1]).toContain(`https://cnb:tok123@${CNB_HOST}/acme/harness.git`);
+    // The token is ours, so a rejected one must fail instead of falling back to
+    // a credential prompt — a login dialog cannot supply a token.
+    expect(cloneCall[2]?.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: '',
+    });
     // No `git config --local credential.helper` follow-up.
     expect(mockedSpawnSync.mock.calls.some(
       (c) => c[1]?.[0] === 'config' && c[1]?.includes('credential.helper'),

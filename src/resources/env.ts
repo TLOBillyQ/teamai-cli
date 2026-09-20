@@ -175,10 +175,12 @@ export class EnvHandler extends ResourceHandler {
     try {
       // git diff exits 0 if no changes, non-zero otherwise when used with --exit-code
       await execFileAsync('git', ['diff', '--exit-code', 'env/env.yaml'], {
+        windowsHide: true,
         cwd: localConfig.repo.localPath,
       });
       // Also check if the file is untracked
       const { stdout } = await execFileAsync('git', ['ls-files', '--others', '--exclude-standard', 'env/env.yaml'], {
+        windowsHide: true,
         cwd: localConfig.repo.localPath,
       });
       if (!stdout.trim()) return [];

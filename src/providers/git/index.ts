@@ -26,13 +26,13 @@ export function normalizeGitIdentity(value: string): string | null {
 
 function gitIdentity(): string {
   const result = spawnSync('git', ['config', '--get', 'user.name'], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 10_000,
     // A console-less parent (a GUI or hook host) makes Windows give the child a
     // console of its own, which flashes a window; CI has no Windows runner, so
     // the option is the only guard.
     windowsHide: true,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10_000,
   });
   const configured = result.status === 0 ? (result.stdout ?? '').trim() : '';
   let osUsername = '';
@@ -74,10 +74,10 @@ export class GenericGitProvider implements GitProvider {
 
   async ensureInstalled(): Promise<void> {
     const result = spawnSync('git', ['--version'], {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10_000,
-      windowsHide: true,
     });
     if (result.error || result.status !== 0) {
       throw new Error('git is required for generic Git repositories but was not found on PATH.');
@@ -88,13 +88,13 @@ export class GenericGitProvider implements GitProvider {
     const remoteUrl = parseGenericGitRepoInput(repo).httpsUrl;
 
     const result = spawnSync('git', ['clone', '--', remoteUrl, localPath], {
+      windowsHide: true,
       encoding: 'utf-8',
       stdio: ['inherit', 'pipe', 'pipe'],
       // Match the 180s default used by the shallow-clone path in clone.ts:
       // large self-hosted repos over slow/VPN links need the extra headroom.
       timeout: 180_000,
       maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
     });
     if (result.error || result.status !== 0) {
       const output = `${result.stderr ?? ''} ${result.stdout ?? ''}`.trim();

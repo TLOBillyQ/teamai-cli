@@ -7,7 +7,7 @@ vi.mock('../utils/logger.js', () => ({
   log: { info: vi.fn(), success: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-// A developer machine may have a real Git for Windows InstallPath in HKLM, so
+// A developer machine may carry a real Git for Windows InstallPath in HKLM, so
 // the default registry locator would succeed and defeat the negative case.
 // Replace execFileSync at the module boundary (builtin-hooks imports it as a
 // named binding, which a bare spyOn on the default export cannot intercept);
@@ -18,12 +18,17 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, default: actual, execFileSync: boom };
 });
 
-import { getDispatchCommand, findGitBashWindows, _resetShellCache } from '../builtin-hooks.js';
+import { builtinHookDefs, findGitBashWindows, getDispatchCommand, _resetShellCache } from '../builtin-hooks.js';
 
 // Windows resolves a bare `bash` to System32's WSL launcher before any PATH
 // entry, and the WSL side has a different $HOME and no npm-global teamai — the
 // hook then dies inside `2>/dev/null || true` with nothing logged. The
 // injector must instead name Git Bash with an absolute path.
+//
+// Fork split: non-Copilot tools render their Windows hook command node-direct
+// (#43/#44, pinned by builtin-hooks.test.ts); only Copilot keeps upstream's
+// bash-wrapper form (#639), because the copilot adapter derives the entry's
+// powershell field from that exact shape (COPILOT_BUILTIN_COMMAND_RE).
 
 function makeFakeGit(root: string, relative: string[] = ['Programs', 'Git']): string {
   const bin = path.join(root, ...relative, 'bin');
@@ -71,7 +76,7 @@ describe('findGitBashWindows', () => {
   });
 });
 
-describe('getDispatchCommand shell resolution', () => {
+describe('dispatch command shell resolution', () => {
   afterEach(() => {
     _resetShellCache();
     vi.unstubAllEnvs();
@@ -85,7 +90,7 @@ describe('getDispatchCommand shell resolution', () => {
     );
   });
 
-  it('Windows names Git Bash by absolute, quoted, forward-slash path', () => {
+  it('Windows renders the Copilot command with the Git Bash absolute path', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-gitbash-'));
     const exe = makeFakeGit(root);
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
@@ -93,13 +98,13 @@ describe('getDispatchCommand shell resolution', () => {
     vi.stubEnv('ProgramFiles', path.join(root, 'missing-pf'));
     vi.stubEnv('ProgramFiles(x86)', path.join(root, 'missing-pf86'));
     vi.stubEnv('LOCALAPPDATA', root);
-    const cmd = getDispatchCommand('stop', 'qoder');
-    expect(cmd).toBe(
-      '"' + exe.split(path.sep).join('/') + '" -lc "teamai hook-dispatch stop --tool qoder 2>/dev/null" || true',
+    const sessionStart = builtinHookDefs('copilot').find((d) => d.event === 'SessionStart');
+    expect(sessionStart?.command).toBe(
+      '"' + exe.split(path.sep).join('/') + '" -lc "teamai hook-dispatch session-start --tool copilot 2>/dev/null" || true',
     );
   });
 
-  it('Windows keeps bare bash when Git Bash cannot be found', () => {
+  it('Windows keeps bare bash for Copilot when Git Bash cannot be found', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-gitbash-empty-'));
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('HOME', root);
@@ -109,8 +114,9 @@ describe('getDispatchCommand shell resolution', () => {
     // No execFileSync stub: the registry probe really runs, and no machine
     // records InstallPath under a freshly-created temp dir, so the locator
     // exhausts every source and the command must degrade to bare `bash`.
-    expect(getDispatchCommand('stop', 'claude')).toBe(
-      'bash -lc "teamai hook-dispatch stop --tool claude 2>/dev/null" || true',
+    const sessionStart = builtinHookDefs('copilot').find((d) => d.event === 'SessionStart');
+    expect(sessionStart?.command).toBe(
+      'bash -lc "teamai hook-dispatch session-start --tool copilot 2>/dev/null" || true',
     );
   });
 });

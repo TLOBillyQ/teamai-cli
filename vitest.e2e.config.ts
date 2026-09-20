@@ -9,6 +9,9 @@ export default defineConfig({
     ],
     testTimeout: 60_000,
     hookTimeout: 30_000,
+    // Real provider flows are exercised here with explicit tokens; the guard keeps
+    // a stray credential prompt (GUI helper / askpass) from blocking the run.
+    setupFiles: ['src/__tests__/setup/git-guard.ts'],
     // E2E tests spawn child processes and touch the real filesystem.
     // Run test files sequentially to avoid race conditions (parallel
     // file-level execution causes intermittent "Cannot find module

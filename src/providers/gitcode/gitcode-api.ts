@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GITCODE_HOST } from './repo-url.js';
 import { sanitizeGitUrl } from '../../utils/redact.js';
+import { nonInteractiveGitEnv } from '../../utils/git-env.js';
 
 /**
  * GitCode (gitcode.com) REST API client.
@@ -178,10 +179,14 @@ function redactCloneOutput(output: string): string {
 export function gitcodeRepoClone(repo: string, localPath: string): void {
   const token = getGitCodeToken();
   const result = spawnSync('git', ['clone', cloneUrl(repo, token), localPath], {
+    windowsHide: true,
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 120_000,
-    windowsHide: true,
+    // The URL carries our token, so a rejected one must not fall back to a
+    // credential prompt (see nonInteractiveGitEnv); without a token the clone is
+    // anonymous and the user's own credential flow stays in charge.
+    env: token ? { ...process.env, ...nonInteractiveGitEnv() } : undefined,
   });
   const allOutput = `${result.stderr ?? ''} ${result.stdout ?? ''}`;
   if (result.status === 0) return;

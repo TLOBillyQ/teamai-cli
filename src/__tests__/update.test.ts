@@ -370,6 +370,108 @@ describe('checkForUpdate', () => {
       }),
     );
   });
+
+  // ─── Issue #43: cache "no update" and back off failures ───
+
+  it('should skip npm view when a recent check found no update', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheck: new Date(Date.now() - 1000).toISOString(),
+      availableUpdate: null,
+    });
+
+    const result = await checkForUpdate();
+
+    expect(result.available).toBe(false);
+    expect(result.latest).toBe(getCurrentVersion());
+    expect(mockedExecSync).not.toHaveBeenCalled();
+  });
+
+  it('should record the failure time when the registry is unreachable', async () => {
+    mockedExecSync.mockRejectedValue(new Error('ENETUNREACH'));
+
+    await checkForUpdate({ force: true });
+
+    expect(mockedSaveState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastUpdateCheckFailure: expect.any(String),
+      }),
+    );
+  });
+
+  it('should skip npm view while a recent failure is still within the backoff window', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    const result = await checkForUpdate();
+
+    expect(result.available).toBe(false);
+    expect(mockedExecSync).not.toHaveBeenCalled();
+  });
+
+  it('should retry npm view once the failure backoff window has passed', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    });
+    mockedExecSync.mockResolvedValue({ stdout: '99.0.0\n', stderr: '' });
+
+    const result = await checkForUpdate();
+
+    expect(mockedExecSync).toHaveBeenCalledTimes(1);
+    expect(result.available).toBe(true);
+  });
+
+  it('should clear a recorded failure after a successful check', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    });
+    mockedExecSync.mockResolvedValue({ stdout: '99.0.0\n', stderr: '' });
+
+    await checkForUpdate();
+
+    expect(mockedSaveState).toHaveBeenCalledWith(
+      expect.objectContaining({ lastUpdateCheckFailure: null }),
+    );
+  });
+
+  it('an explicit `teamai update --check` queries the registry inside the backoff window', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 1000).toISOString(),
+    });
+    mockedExecSync.mockResolvedValue({ stdout: '99.0.0\n', stderr: '' });
+
+    await update({ check: true });
+
+    expect(mockedExecSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('a hook-driven update honors the backoff window', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    await doUpdate();
+
+    expect(mockedExecSync).not.toHaveBeenCalled();
+  });
+
+  it('forces a registry call even inside the failure backoff window', async () => {
+    mockedLoadState.mockResolvedValue({
+      ...defaultState,
+      lastUpdateCheckFailure: new Date(Date.now() - 1000).toISOString(),
+    });
+    mockedExecSync.mockResolvedValue({ stdout: '99.0.0\n', stderr: '' });
+
+    await checkForUpdate({ force: true });
+
+    expect(mockedExecSync).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── Test #7: Policy=auto, npm install executes ─────────
@@ -740,6 +842,33 @@ describe('hook refresh after update', () => {
     expect(mockedLog.error).toHaveBeenCalledWith(
       expect.stringContaining('Hook refresh after update skipped'),
     );
+  });
+
+  it('forwards what the refresh child printed (the Codex trust reminder)', async () => {
+    // The child runs `hooks inject --silent`, so the only thing it can print is
+    // text that deliberately bypasses silence — the Codex hook trust reminder
+    // (issue #44). execFile pipes that output and update.ts is the only one who
+    // can hand it on, or a hook file rewritten by this upgrade stays at
+    // trust=modified with nothing telling the user to re-trust it.
+    mockedEntry.mockReturnValue('/teamai/dist/index.js');
+    const reminder =
+      '⚠ Codex hooks written, but Codex may require you to review/trust them before they run.\n';
+    mockedExecSync
+      .mockResolvedValueOnce({ stdout: '99.0.0\n', stderr: '' }) // npm view
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })          // npm install
+      .mockResolvedValueOnce({ stdout: reminder, stderr: 'child note\n' });
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await doUpdate();
+
+      expect(out).toHaveBeenCalledWith(reminder);
+      expect(err).toHaveBeenCalledWith('child note\n');
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
   });
 });
 

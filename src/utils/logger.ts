@@ -143,6 +143,16 @@ export const log = {
     if (silentMode) return;
     writeInfoLine(`${chalk.yellow('⚠')} ${msg}`);
   },
+  /**
+   * Warning that must reach the user even under `--silent`. `--silent` mutes
+   * routine progress output, but a Codex trust reminder is not progress: it
+   * explains why hooks that were just rewritten have stopped firing, and the
+   * paths that rewrite them after an upgrade (the auto-update hook refresh, the
+   * session-start pull) are exactly the silent ones (issue #44).
+   */
+  warnAlways(msg: string): void {
+    writeInfoLine(`${chalk.yellow('⚠')} ${msg}`);
+  },
   error(msg: string): void {
     console.error(chalk.red('✖'), msg);
     writeToFile('ERROR', msg);

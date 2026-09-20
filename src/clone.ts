@@ -7,6 +7,7 @@ import { getGiteaToken, giteaAuthHeaderValue } from './providers/gitea/gitea-api
 import { getGitLabToken } from './providers/gitlab/gitlab-api.js';
 import { getGitCodeToken } from './providers/gitcode/gitcode-api.js';
 import { tgitGitCloneUrl } from './providers/tgit/rest-auth.js';
+import { nonInteractiveGitEnv } from './utils/git-env.js';
 import { log } from './utils/logger.js';
 import { sanitizeGitUrl } from './utils/redact.js';
 
@@ -83,17 +84,21 @@ function buildAuthHeader(token: string, username = 'x-access-token'): string {
 
 /**
  * 包装 spawn 为 Promise，返回 stdout/stderr/exitCode。
+ *
+ * `env` overrides the child environment (used by token-authenticated clones;
+ * see nonInteractiveGitEnv).
  */
 function runCommand(
     cmd: string,
     args: string[],
-    opts: { cwd?: string; timeoutMs: number },
+    opts: { cwd?: string; timeoutMs: number; env?: NodeJS.ProcessEnv },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
         const child = spawn(cmd, args, {
             windowsHide: true,
             stdio: ['ignore', 'pipe', 'pipe'],
             cwd: opts.cwd,
+            env: opts.env,
         });
 
         let stdout = '';
@@ -270,7 +275,16 @@ export async function shallowClone(
     );
 
     try {
-        const { code, stderr } = await runCommand('git', cloneArgs, { timeoutMs });
+        const { code, stderr } = await runCommand('git', cloneArgs, {
+            timeoutMs,
+            // When the credential is ours (http.extraHeader for github/gitlab/
+            // gitea/gitcode, an OAuth URL for tgit), a rejected one must fail
+            // instead of prompting — a login dialog cannot supply a PAT.
+            // Providers whose auth is the user's credential helper are untouched.
+            env: extraAuthHeader || cloneMethod === 'https-token'
+                ? { ...process.env, ...nonInteractiveGitEnv() }
+                : undefined,
+        });
         if (code !== 0) {
             // 清理失败的目录
             await fs.remove(localPath).catch(() => undefined);
