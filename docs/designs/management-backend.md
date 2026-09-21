@@ -47,7 +47,7 @@ plane accepts identity-bound events with separate retention and write permission
 | Current data | Current path / behavior | Proposed backend mapping |
 | --- | --- | --- |
 | `teamai.yaml` | Configuration, sharing policy, tool paths and reviewers (`src/config.ts`, `src/types.ts`) | Versioned policy/configuration records; reviewed changes generate a compatibility view |
-| `skills/` | SkillsHandler, namespaces and marketplace metadata | Resource bundles with immutable files, dependencies and generated marketplace views |
+| `skills/` | SkillsHandler, namespaces and marketplace metadata; Git history classifies suspected local leftovers for status/pull warnings and default push exclusion, without deleting them | Resource bundles with immutable files, dependencies and generated marketplace views |
 | `rules/` | RulesHandler and enforced-rule selection | Versioned rules with separately enforced policy constraints |
 | `docs/` | DocsHandler and indexed documentation | Versioned documents, authorized materialization and recall indexing |
 | `env/env.yaml` | EnvHandler, local overrides and environment injection | Non-secret templates plus secret references; secret resolution has separate authorization |
@@ -158,6 +158,8 @@ resources, retaining personal modifications as conflicts. Device unlink and
 uninstall revoke credentials and clear local credentials, indexes and managed
 state without deleting unrelated user files. If offline, local cleanup completes
 and remote revocation remains visibly pending until submitted or done in the console.
+
+Current Git CLI boundary (issue #55): `uninstall` retires only the active binding. It preserves shared credentials, caches, project partitions, docs and machine-wide dispatchers; credential revocation above is a future management-backend operation, not a fallback directory deletion. Invalid configuration authorizes no cleanup.
 
 **J4: administrator publishes across projects.** An administrator prepares a
 change set for several projects in the same organization, sees effective-resource

@@ -2076,6 +2076,22 @@ export async function pull(
     }
   }
 
+  // Outside pullForScope so unchanged-revision pulls also report leftovers.
+  if (!options.silent && !options.dryRun) {
+    const { reportSkillLeftovers } = await import('./resources/skills.js');
+    for (const localConfig of [reconcileUser, reconcileProject]) {
+      if (!localConfig) continue;
+      try {
+        const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
+        if (teamConfig) {
+          reportSkillLeftovers(await getHandler('skills').scanLocalForPush(teamConfig, localConfig));
+        }
+      } catch (error) {
+        log.debug(`Could not check skill leftovers: ${(error as Error).message}`);
+      }
+    }
+  }
+
   // 6. Post-conditions. Everything above reported what it *did*; these report
   //    what is actually on disk (issue #598). Only after an explicit pull: the
   //    SessionStart hook runs pull({ silent: true }) and must stay free.

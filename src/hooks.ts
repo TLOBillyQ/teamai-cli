@@ -261,6 +261,8 @@ function desiredDefs(tool: string, teamDefs: HookDef[], builtinOverride?: Builti
 // ─── Reconcile options & manifest ───────────────────────────
 
 export interface ReconcileHooksOptions {
+  /** Uninstall only this binding's recorded team hooks, retaining shared dispatchers. */
+  removeTeamOnly?: boolean;
   /** Remove all teamai-managed hooks instead of injecting the desired set. */
   removeAll?: boolean;
   /**
@@ -597,6 +599,7 @@ async function reconcileClaudeFormat(
     teamDefs.filter((d) => !d.tools || d.tools.includes(tool)).map((d) => d.key),
   );
   const isManaged = (e: HookMatcher): boolean => {
+    if (opts.removeTeamOnly) return priorTeamCommands.has(e.hooks?.[0]?.command ?? '');
     if (isBuiltinClaudeEntry(e) || (!!opts.removeAll && isAgentClaudeEntry(e))) return true;
     if (!teamActive || !isTeamClaudeEntry(e)) return false;
     // Project-scope hooks share HOME with other projects. Only remove entries
@@ -672,7 +675,7 @@ async function reconcileCursorFormat(
   if (!hooksJson.hooks) hooksJson.hooks = {};
 
   const isManaged = (entry: CursorHookEntry): boolean =>
-    isTeamaiHookCommand(entry.command) || priorTeamCommands.has(entry.command);
+    (!opts.removeTeamOnly && isTeamaiHookCommand(entry.command)) || priorTeamCommands.has(entry.command);
 
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
   const desiredByEvent: Record<string, CursorHookEntry[]> = {};
@@ -753,7 +756,7 @@ async function reconcileCopilotFormat(
   if (!hooksJson.hooks) hooksJson.hooks = {};
 
   const isManaged = (entry: CopilotHookEntry): boolean => copilotEntryCommands(entry).some((command) =>
-    TEAMAI_COMMAND_MARKERS.some((marker) => command.includes(marker)) || priorTeamCommands.has(command),
+    (!opts.removeTeamOnly && TEAMAI_COMMAND_MARKERS.some((marker) => command.includes(marker))) || priorTeamCommands.has(command),
   );
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
   const desiredByEvent: Record<string, CopilotHookEntry[]> = {};
@@ -809,7 +812,7 @@ async function reconcileCodexFormat(
 
   const isManaged = (entry: CodexHookMatcher): boolean => {
     const cmd = entry.hooks?.[0]?.command ?? '';
-    return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
+    return (!opts.removeTeamOnly && hasTeamaiMarker(cmd)) || priorTeamCommands.has(cmd);
   };
 
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
@@ -867,7 +870,7 @@ async function reconcileZcodeFormat(
     'sh.Run "cmd /d /s /c """ & WScript.Arguments(0) & " < """ & spool & """ >nul 2>&1""", 0, True',
     'fso.DeleteFile spool, True',
   ].join('\r\n');
-  if (opts.removeAll) {
+  if (opts.removeAll && !opts.removeTeamOnly) {
     // Unconditional: after a normal inject the file equals the template, so a
     // content-diff gate never fires and the script would be left behind.
     await rm(vbsPath, { force: true });
@@ -907,7 +910,7 @@ async function reconcileZcodeFormat(
   // same strategy as the Codex format.
   const isManaged = (entry: ZcodeHookMatcher): boolean => {
     const cmd = zcodeEntryCommand(entry);
-    return hasTeamaiMarker(cmd) || priorTeamCommands.has(cmd);
+    return (!opts.removeTeamOnly && hasTeamaiMarker(cmd)) || priorTeamCommands.has(cmd);
   };
 
   const defs = opts.removeAll ? [] : desiredDefs(tool, teamDefs, opts.builtinOverride);
@@ -1130,7 +1133,7 @@ export async function reconcileHooks(
   const allPriorRecords = manifest?.[tool] ?? [];
   const priorRecords = opts.teamHookProjectRoot
     ? allPriorRecords.filter((r) => isGatedForProject(r.command, opts.teamHookProjectRoot!))
-    : allPriorRecords;
+    : opts.removeTeamOnly ? allPriorRecords.filter((r) => !isProjectGatedCommand(r.command)) : allPriorRecords;
   const priorTeamCommands = new Set(priorRecords.map((r) => r.command));
   const scopedDefs = scopedTeamDefs(teamDefs, opts.teamHookProjectRoot, tool);
   const desiredTeamCommands = new Set(scopedDefs.filter((d) => !d.tools || d.tools.includes(tool)).map((d) => d.command));

@@ -7,6 +7,7 @@ import { getUserHome } from './home.js';
 let verboseEnabled = false;
 let silentMode = false;
 let stderrMode = false;
+let fileLoggingEnabled = true;
 
 // ─── File transport ─────────────────────────────────────
 //
@@ -73,6 +74,7 @@ function maybeRotate(): void {
  * Silently fails — never throws, never recurses into log.
  */
 function writeToFile(level: string, msg: string): void {
+  if (!fileLoggingEnabled) return;
   if (_writing) return; // prevent recursion
   _writing = true;
   try {
@@ -98,6 +100,7 @@ export function _setLogFilePath(p: string): void {
 
 /** Reset internal state (for testing only). */
 export function _resetState(): void {
+  fileLoggingEnabled = true;
   _logFilePath = null;
   _dirEnsured = false;
   _writing = false;
@@ -107,6 +110,11 @@ export function _resetState(): void {
 
 export function setVerbose(v: boolean): void {
   verboseEnabled = v;
+}
+
+/** Keep read-only command previews from creating or rotating debug.log. */
+export function setFileLogging(enabled: boolean): void {
+  fileLoggingEnabled = enabled;
 }
 
 export function setSilent(s: boolean): void {

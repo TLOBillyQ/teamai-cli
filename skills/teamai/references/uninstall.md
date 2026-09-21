@@ -1,4 +1,4 @@
-# Scenario: Uninstall — remove TeamAI from this machine
+# Scenario: Uninstall — leave the active TeamAI binding
 
 The user wants to remove TeamAI. **You run the command for them** — they should not
 have to type `teamai uninstall` themselves. Everything you say goes in the user's
@@ -9,21 +9,26 @@ language (global rule 1); only the commands stay verbatim.
 Uninstalling removes hooks and synced resources from the machine and cannot be
 undone with a single button, so confirm before running anything. Ask ONE question:
 
-*"Do you want to remove TeamAI from **just this AI tool**, or from the **whole
-machine** (all tools)?"*
+*"Do you want to remove TeamAI from **just this AI tool**, or from **all tools in the current binding**?"*
 
 - **Just this tool** → `--agent <tool>` (use the tool this conversation runs in,
-  e.g. `claude`). Shared resources are removed only if it is the last tool using
-  them.
-- **Whole machine** → no `--agent` flag.
+  e.g. `claude`). The binding is retired only if it is the last enabled tool.
+- **All tools in this binding** → no `--agent` flag.
 
 Reassure them (in their language): *"This only removes things from your computer.
 Your team's repo on the website is untouched — you can rejoin any time with
 `/teamai` and the repo URL."*
 
-## Step 2 — Run it (you run it)
+## Step 2 — Preview the scope, then run it
 
-Whole machine:
+Run `teamai uninstall --dry-run` from the intended directory. For user scope, use
+HOME; for project scope, use that workspace. Check the displayed scope and paths.
+`--agent` selects a tool within that scope, not a different scope. Missing or
+invalid configuration causes no deletion: report that outcome instead of deleting
+`.teamai` manually. Project partitions, caches, credentials, docs, local-agent
+plugins and shared dispatchers are preserved.
+
+All tools in the active binding:
 
 ```bash
 teamai uninstall
@@ -46,7 +51,7 @@ teamai uninstall --force
 ## Step 3 — Report the result in the user's language
 
 Tell them what was removed and remind them, in one line, how to come back:
-*"Done — TeamAI has been removed from this machine. To rejoin later, run `/teamai`
+*"Done — The active TeamAI binding has been removed; shared project data and dispatchers are retained. To rejoin later, run `/teamai`
 and give it your team repo URL."*
 
 ## Notes

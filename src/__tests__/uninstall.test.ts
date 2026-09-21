@@ -250,8 +250,9 @@ describe('uninstall', () => {
     expect(zshrc).toContain('# More user config');
     expect(zshrc).not.toContain(TEAMAI_ENV_START);
 
-    // ~/.teamai/ removed
-    expect(await fse.pathExists(teamaiHome)).toBe(false);
+    // Binding retired; shared data home retained
+    expect(await fse.pathExists(teamaiHome)).toBe(true);
+    expect(await fse.pathExists(path.join(teamaiHome, 'config.yaml'))).toBe(false);
   });
 
   // Regression (#693 review): the Windows fix in #682 changed which profile
@@ -621,7 +622,7 @@ describe('uninstall', () => {
     expect(after.mcpServers['my-own']).toEqual({ command: 'my-server' });
   });
 
-  it('移除 OpenClaw 系 agent 的 HOOK.md 目录（无 settings 路径）', async () => {
+  it('preserves shared OpenClaw dispatchers', async () => {
     const { homeDir, repoPath, teamaiHome } = await setupFixture(tmpDir);
     vi.stubEnv('HOME', homeDir);
     vi.stubEnv('SHELL', '/bin/zsh');
@@ -649,10 +650,10 @@ describe('uninstall', () => {
     await uninstall({ force: true });
 
     // The OpenClaw HOOK.md dir must be removed (regression: previously leaked).
-    expect(await fse.pathExists(ocHookDir)).toBe(false);
+    expect(await fse.pathExists(ocHookDir)).toBe(true);
   });
 
-  it('project scope 卸载同时清掉用户级和项目级的 OpenCode plugin', async () => {
+  it('project uninstall preserves the user OpenCode dispatcher and removes the legacy project copy', async () => {
     const projectRoot = path.join(tmpDir, 'oc-project');
     const homeDir = path.join(tmpDir, 'home');
     const repoPath = path.join(projectRoot, '.teamai', 'team-repo');
@@ -683,7 +684,7 @@ describe('uninstall', () => {
 
     await uninstall({ force: true });
 
-    expect(await fse.pathExists(path.join(userPlugin, 'teamai-hooks.ts'))).toBe(false);
+    expect(await fse.pathExists(path.join(userPlugin, 'teamai-hooks.ts'))).toBe(true);
     expect(await fse.pathExists(path.join(projectPlugin, 'teamai-hooks.ts'))).toBe(false);
     // Agent-hook sweep must delete inside the plugin dir, not a cwd-relative path.
     expect(await fse.pathExists(path.join(projectPlugin, 'teamai-agent-legacy.ts'))).toBe(false);
@@ -924,7 +925,7 @@ describe('uninstall', () => {
     await expect(uninstall({ force: true })).resolves.not.toThrow();
   });
 
-  it('配置加载失败时仍然移除 ~/.teamai/', async () => {
+  it('preserves the data home when configuration cannot be loaded', async () => {
     const homeDir = path.join(tmpDir, 'broken-home');
     const teamaiHome = path.join(homeDir, '.teamai');
     await fse.ensureDir(teamaiHome);
@@ -935,7 +936,8 @@ describe('uninstall', () => {
 
     await uninstall({ force: true });
 
-    expect(await fse.pathExists(teamaiHome)).toBe(false);
+    expect(await fse.pathExists(teamaiHome)).toBe(true);
+    expect(await fse.readFile(path.join(teamaiHome, 'config.yaml'), 'utf8')).toBe('broken');
   });
 
   it('project scope 定位正确目录', async () => {
@@ -968,8 +970,9 @@ describe('uninstall', () => {
 
     // Project-scope skill removed
     expect(await fse.pathExists(path.join(projectRoot, '.claude', 'skills', 'proj-skill'))).toBe(false);
-    // Project .teamai/ removed
-    expect(await fse.pathExists(teamaiHome)).toBe(false);
+    // Project binding retired; unowned data retained
+    expect(await fse.pathExists(teamaiHome)).toBe(true);
+    expect(await fse.pathExists(path.join(teamaiHome, 'config.yaml'))).toBe(false);
   });
 
   it('non-self project scope removes hooks from HOME, where #370 injects them (not <projectRoot>)', async () => {
@@ -1237,8 +1240,9 @@ describe('uninstall', () => {
 
     // claude team-skill removed
     expect(await fse.pathExists(path.join(homeDir, '.claude', 'skills', 'team-skill'))).toBe(false);
-    // ~/.teamai removed (claude was the last tool)
-    expect(await fse.pathExists(teamaiHome)).toBe(false);
+    // Last tool retires the binding, not the shared directory
+    expect(await fse.pathExists(teamaiHome)).toBe(true);
+    expect(await fse.pathExists(path.join(teamaiHome, 'config.yaml'))).toBe(false);
     // reconcileHooks called with claude + removeAll
     expect(mockReconcileHooks).toHaveBeenCalledWith(
       path.join(homeDir, '.claude', 'settings.json'),
@@ -1451,8 +1455,9 @@ describe('uninstall', () => {
     // codex team-skill removed
     expect(await fse.pathExists(path.join(homeDir, '.codex', 'skills', 'team-skill'))).toBe(false);
     // ~/.teamai removed — claude's settings.json has no teamai hooks, so it doesn't block shared removal
-    expect(await fse.pathExists(teamaiHome)).toBe(false);
-    // Last-tool uninstall deletes ~/.teamai, so there is no config to persist to.
+    expect(await fse.pathExists(teamaiHome)).toBe(true);
+    expect(await fse.pathExists(path.join(teamaiHome, 'config.yaml'))).toBe(false);
+    // Last-tool uninstall retires config.yaml, so there is no binding to update.
     expect(mockSaveLocalConfig).not.toHaveBeenCalled();
     expect(mockSaveLocalConfigForScope).not.toHaveBeenCalled();
   });

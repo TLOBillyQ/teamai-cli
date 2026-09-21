@@ -153,9 +153,11 @@ teamai init https://github.com/yourorg/yourrepo
 无 teamai 残留，且同一仓库的 `git worktree` 共享同一分区。各 Agent 的项目根目录
 （`.claude/`、`.cursor/`、`.codebuddy/` 等）仍在工作区内、于 **SessionStart** 时按刚打开的
 工具创建。例如，打开 Claude Code 时会创建 `.claude/`，再由 pull 写入。单独执行 `teamai pull`
-仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录；唯一的例外
-是你显式启用过的工具（`teamai init --agent <id>`，或 `teamai init .` 的多选），pull 会为它创建目录，
-确保 skills 真正落盘。被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
+仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录。（用
+`teamai init --agent <id>` 或 `teamai init .` 的多选显式启用工具时，目录在启用那一刻就已创建，
+而不是等下一次 pull。）如果之后某工具被移出 `enabledAgents` 而其根目录下仍留着同步过的文件，
+pull 的收尾检查和 `teamai status` 会列出该残留，并提示用 `teamai uninstall --agent <id>` 清除。
+被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
 一个都没装上或加了 `--verbose` 时，逐个列出缺失的确切路径，例如
 `kimi: skipped - <project>/.kimi-code not found`。
 
@@ -1486,7 +1488,7 @@ Kiro 已作为内置目标支持。TeamAI 会将 Skills、Rules 和 Subagents �
 ZCode 已作为内置目标支持。Skills 下发到 `.zcode/skills/`（ZCode 同时会读取中央目录 `~/.agents/skills/`，该目录由 `agents` 条目覆盖），Subagents 以 Claude 风格 Markdown 下发到 `.zcode/agents/`。Hooks 会合并进共享的 `~/.zcode/cli/config.json`，并保留插件状态等无关键值。写入器为你处理了两个 ZCode 特有的细节：
 
 - ZCode 的配置文件钩子**默认禁用**——TeamAI 会强制置 `hooks.enabled: true`，确保写入的条目真正生效。
-- Windows 上，钩子条目通过隐藏的 **wscript VBS 启动器**执行（`wscript.exe <teamai-hook-dispatch.vbs> <分发命令尾段>`）：wscript 属 GUI 子系统，钩子运行绝不弹控制台黑框；启动器把 STDIN 暂存为临时文件再转发，保证 payload 完整到达 `hook-dispatch`。超时按事件放宽（会话启动 180 秒、stop / prompt 提交 60 秒、工具调用后 30 秒），避免会话启动时携带仓库拉取的分发被中途掐断。含多字节文本（如中文）的 payload 在启动器的 ANSI 代码页暂存环节可能降级——身份字段会被抢救，降级分发仍能正确关联到会话；卸载时会同时清除条目与脚本文件。
+- Windows 上，钩子条目通过隐藏的 **wscript VBS 启动器**执行（`wscript.exe <teamai-hook-dispatch.vbs> <分发命令尾段>`）：wscript 属 GUI 子系统，钩子运行绝不弹控制台黑框；启动器把 STDIN 暂存为临时文件再转发，保证 payload 完整到达 `hook-dispatch`。超时按事件放宽（会话启动 180 秒、stop / prompt 提交 60 秒、工具调用后 30 秒），避免会话启动时携带仓库拉取的分发被中途掐断。含多字节文本（如中文）的 payload 在启动器的 ANSI 代码页暂存环节可能降级——身份字段会被抢救，降级分发仍能正确关联到会话；卸载时保留共享 dispatcher 条目和脚本，以供其他绑定使用。
 - POSIX 上条目就是普通的 `bash -lc <分发命令尾段>` argv 向量，不写入启动器；两个平台上，命令尾段都以 argv 末位元素原样存储——这正是托管条目识别与托管清单比对的依据。
 
 以上路径已对照 ZCode 桌面端实测验证：设置页「新建子智能体」写入的就是 `~/.zcode/agents/*.md`，反向放入的文件也会出现在页面的已安装列表中。MCP Server 下发到 `~/.agents/mcp.json`（用户级，Claude 的 `mcpServers` 结构——正是 ZCode 自己的 MCP 设置页读取的文件）。项目级暂未接入：ZCode 的工作区 MCP 使用不同的键（`.zcode/config.json` 内的 `mcp.servers`），Claude 写入器无法生成该结构。
@@ -1495,7 +1497,7 @@ ZCode 已作为内置目标支持。Skills 下发到 `.zcode/skills/`（ZCode �
 
 ### Oh My Pi
 
-Oh My Pi（OMP）已作为内置目标支持。TeamAI 将 Skills、Rules 和 Subagents 下发到 OMP 的原生目录——项目级为 `.omp/skills/`、`.omp/rules/` 和 `.omp/agents/`，用户级为 `~/.omp/agent/skills/`、`~/.omp/agent/rules/` 和 `~/.omp/agent/agents/`（用户级资源位于 agent 目录 `~/.omp/agent/` 下，与项目级前缀不同，TeamAI 会随作用域自动切换）。指令（`claudemd`）下发到对应的 `AGENTS.md`；MCP Server 合并进 `~/.omp/agent/mcp.json` / `<project>/.omp/mcp.json`（Claude `mcpServers` 结构，见上文 MCP 章节）。Skills 采用一层 `<name>/SKILL.md` 目录结构，TeamAI 在同步时补全 `description`——OMP 原生 skill 发现要求该字段。以上路径遵循 OMP 官方文档的发现布局（对照 OMP 18.2.5 验证）。Hooks 走 OMP 的 extension runner：`teamai pull` 会生成唯一的 extension 写入 `~/.omp/agent/extensions/teamai-hooks.ts`（绝不写项目副本——OMP 会同时加载两个根并导致每个事件双派发），它把 OMP 的 `session_start` / `session_stop` / `before_agent_start` / `tool_result` 事件转发给所有 agent 共用的 `teamai hook-dispatch` 入口，并按会话 `cwd` 做项目门控。`session_stop` 处理器不返回任何值，分发绝不会强制会话继续；由于 OMP 的工具名是小写（`bash`、`read` 等）且没有 `Skill` / `TodoWrite` 工具，post-tool-use 不做 matcher 定向分发。`teamai uninstall` 会移除该 extension。OMP 的 profile（`OMP_PROFILE` / `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`，会迁移 agent 目录）暂不支持，使用默认的 `~/.omp/agent/` 布局。
+Oh My Pi（OMP）已作为内置目标支持。TeamAI 将 Skills、Rules 和 Subagents 下发到 OMP 的原生目录——项目级为 `.omp/skills/`、`.omp/rules/` 和 `.omp/agents/`，用户级为 `~/.omp/agent/skills/`、`~/.omp/agent/rules/` 和 `~/.omp/agent/agents/`（用户级资源位于 agent 目录 `~/.omp/agent/` 下，与项目级前缀不同，TeamAI 会随作用域自动切换）。指令（`claudemd`）下发到对应的 `AGENTS.md`；MCP Server 合并进 `~/.omp/agent/mcp.json` / `<project>/.omp/mcp.json`（Claude `mcpServers` 结构，见上文 MCP 章节）。Skills 采用一层 `<name>/SKILL.md` 目录结构，TeamAI 在同步时补全 `description`——OMP 原生 skill 发现要求该字段。以上路径遵循 OMP 官方文档的发现布局（对照 OMP 18.2.5 验证）。Hooks 走 OMP 的 extension runner：`teamai pull` 会生成唯一的 extension 写入 `~/.omp/agent/extensions/teamai-hooks.ts`（绝不写项目副本——OMP 会同时加载两个根并导致每个事件双派发），它把 OMP 的 `session_start` / `session_stop` / `before_agent_start` / `tool_result` 事件转发给所有 agent 共用的 `teamai hook-dispatch` 入口，并按会话 `cwd` 做项目门控。`session_stop` 处理器不返回任何值，分发绝不会强制会话继续；由于 OMP 的工具名是小写（`bash`、`read` 等）且没有 `Skill` / `TodoWrite` 工具，post-tool-use 不做 matcher 定向分发。`teamai uninstall` 保留该共享 extension，以供项目分发使用。OMP 的 profile（`OMP_PROFILE` / `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`，会迁移 agent 目录）暂不支持，使用默认的 `~/.omp/agent/` 布局。
 
 ### JoyCode
 
@@ -1871,7 +1873,7 @@ teamai 会往几类由你自己维护的文件（各工具的指令文件、shel
 
 ## 卸载
 
-`teamai uninstall` 会智能清理所有 teamai 管理的资源，**保留用户自建内容**。
+`teamai uninstall` 退出当前绑定（当前目录检测到 project 配置时使用 project scope，否则使用 user scope），**不会递归删除数据根目录**。退出 user 绑定时请从 HOME 执行，并先用 `--dry-run` 核对显示的 scope。
 
 ```bash
 # 预览将要移除的每个受管路径（不做实际变更）
@@ -1888,21 +1890,23 @@ teamai uninstall --agent claude
 ```
 
 移除内容：
-- AI 工具 settings 中的 teamai hooks
+- 归属当前绑定的团队 hook 记录；保留共享 dispatcher 和其他项目的团队 hooks
 - 工具指令文件（CLAUDE.md / AGENTS.md 等）中的 teamai 托管块（见[托管块标记](#托管块标记)；保留用户自写内容）
 - 团队同步的 skills，包括 OpenClaw workspace skills（保留用户自建 skills）
 - 团队同步的 rules
 - 团队同步的自定义 agents 和 CLI 内置 agents（保留用户自建 agents）
 - Shell profile 中的 env 块——会清理每一个候选文件（`.zshrc`、`.bashrc`、`.bash_profile`、`.bash_login`、`.profile`）中、代码块指向本作用域自身 `env.sh` 的那些，而不仅仅是当前 `pull` 会选中的那一个；指向其他作用域 `env.sh` 的代码块不受影响
-- `~/.teamai/` 目录
+- 当前绑定的 `config.yaml` 和生成的 `env.sh`
+
+保留项目分区、缓存、凭据、仓库克隆、docs、local-agent 插件及无法确认归属的数据。共享 hook dispatcher 及运行依赖会保留，因为旧布局的项目也可能依赖它们。配置缺失、损坏或不可读时不执行删除；此时 `--agent` 因无法确认工具归属而报错。重复执行完整卸载是安全的。
 
 ### 只卸载单个工具（`--agent <tool>`）
 
-`--agent <tool>` 只移除该工具的 teamai 资源（hooks、CLAUDE.md 块、skills、rules、团队同步的自定义 agents、内置 agents）。工具名即 `toolPaths` 的键（如 `claude`、`codex`、`codebuddy`），匹配大小写不敏感。传入未知工具名会直接报错并列出可用工具、不执行任何删除，并以非零状态码退出。
+`--agent <tool>` 只移除该工具的 teamai 资源（hooks、CLAUDE.md 块、skills、rules、团队同步的自定义 agents、内置 agents）。如果移除后工具根目录下只剩空目录（例如被清空的 `.cursor/skills/`），这些空壳也会一并清掉。工具名即 `toolPaths` 的键（如 `claude`、`codex`、`codebuddy`），匹配大小写不敏感。传入未知工具名会直接报错并列出可用工具、不执行任何删除，并以非零状态码退出。
 
 若该工具的指令文件还被其他已安装工具使用（project scope 下工作区根目录的 `AGENTS.md` 由 `zcode`、`codex`、`dsh`、`workbuddy`、`hermes` 共用），只移除其他工具不依赖的区块。例如只安装了 ZCode 和 WorkBuddy 时，`--agent zcode` 会剥掉规则区块，但保留 WorkBuddy 仍在读取的团队文化与共享指令区块。全量 `teamai uninstall` 会移除全部区块。
 
-跨工具共享资源（shell profile env 块、docs 目录、`~/.teamai/`）**仅当该工具自身存在 teamai 资源、且它是最后一个仍在使用 teamai 的工具时**才一并移除，否则会为其余工具保留。（因此，定向卸载一个自身没有任何 teamai 资源的工具是 no-op，即便它恰好是唯一的工具，也不会删除共享资源。）
+仅当所选工具自身存在资源、且是当前绑定最后一个启用的工具时，才移除绑定文件及其 shell profile env 块；否则为其他工具保留绑定。两种分支均不会删除共享项目数据或机器级 dispatcher。
 
 该排除是持久的：`uninstall --agent <tool>` 会把该工具从 `enabledAgents` 移除并记入 `disabledAgents`，因此之后的 `pull`（或其他工具的 session-start hook）不会再把它的 skills、rules、agents、CLAUDE.md 块或 hooks 重新装回。重新执行 `init --agent <tool>` 会清除该排除、恢复对该工具的同步。
 
@@ -1933,7 +1937,7 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 
 **Q: 在项目里执行 `teamai init` 后没有 `.claude/`（或 `.cursor/`、`.codebuddy/`）目录？**
 
-这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录；用 `teamai init --agent <id>` 显式启用过的工具除外。
+这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录。
 
 **Q: pull 显示 "Synced N skills"，但实际什么都没装上？**
 
@@ -1944,7 +1948,7 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 [project] No AI tool directories found under D:\work\myrepo - nothing was installed.
 ```
 
-两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents`，此后 pull 会为它创建目录。
+两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents` 并创建其目录，之后的 pull 会往里安装。
 
 **Q: pull 提示 `Kimi Code hooks skipped: ... does not exist`？**
 
@@ -1977,6 +1981,11 @@ teamai hooks inject  # 重新注入
 **Q: push 提示 "no new resources detected"？**
 
 `push` 只检测新增或修改的资源。没有变更时无需推送。
+
+直接在 Git 中删除或重命名 skill 后，本地可能留有旧副本。如果当前团队仓已无此名称，但本地团队 clone 的 Git 历史里存在过，`status` 会将其单独列为 **suspected skill leftover（疑似残留）**，默认 `push` 不再把它当作新资源。手动 `pull` 即使无需同步，也会列出这些名称；请检查所有本地副本，确认无用后再手动删除。此检查不会自动删除文件。真正的新 skill 行为不变。
+
+如果你有意复用了历史名称，检查内容后可运行 `teamai push --skill <skill目录路径>` 显式作为新资源提交，或改成团队历史中未出现过的名称。Tombstone、内置 skill、source skill 和 push-ignore 的排除行为保持不变。检测仅使用本地已有 Git 历史；浅克隆或 HTTP 快照可能缺少识别旧名称所需的证据。
+
 
 **Q: 如何删除已推送的资源？**
 

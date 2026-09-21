@@ -55,7 +55,7 @@ then open that reference file and follow it step by step.
 | Manage a team: publish/update skills, rules, MCP, env, invite members | `references/manage-admin.md`  |
 | Share / publish a skill with the team ("share this xxx skill") — any member, not just admins | `references/contribute-member.md` |
 | Open the team dashboard (web UI)                    | run `teamai dashboard` (see cheat sheet) |
-| Remove / uninstall TeamAI from this machine         | `references/uninstall.md`                |
+| Leave the active TeamAI binding         | `references/uninstall.md`                |
 
 > **Sharing session *learnings* is automatic — not a menu choice, and not routed
 > here.** TeamAI prompts on its own at the end of a session worth sharing, and the
