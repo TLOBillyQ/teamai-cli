@@ -153,9 +153,11 @@ teamai init https://github.com/yourorg/yourrepo
 无 teamai 残留，且同一仓库的 `git worktree` 共享同一分区。各 Agent 的项目根目录
 （`.claude/`、`.cursor/`、`.codebuddy/` 等）仍在工作区内、于 **SessionStart** 时按刚打开的
 工具创建。例如，打开 Claude Code 时会创建 `.claude/`，再由 pull 写入。单独执行 `teamai pull`
-仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录；唯一的例外
-是你显式启用过的工具（`teamai init --agent <id>`，或 `teamai init .` 的多选），pull 会为它创建目录，
-确保 skills 真正落盘。被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
+仍会跳过项目里还不存在根目录的工具，因此不会给尚未在本项目打开过的 Agent 凭空建目录。（用
+`teamai init --agent <id>` 或 `teamai init .` 的多选显式启用工具时，目录在启用那一刻就已创建，
+而不是等下一次 pull。）如果之后某工具被移出 `enabledAgents` 而其根目录下仍留着同步过的文件，
+pull 的收尾检查和 `teamai status` 会列出该残留，并提示用 `teamai uninstall --agent <id>` 清除。
+被跳过的工具会在 pull 输出中列出：至少装上一个 target 时汇总为一行；
 一个都没装上或加了 `--verbose` 时，逐个列出缺失的确切路径，例如
 `kimi: skipped - <project>/.kimi-code not found`。
 
@@ -1898,7 +1900,7 @@ teamai uninstall --agent claude
 
 ### 只卸载单个工具（`--agent <tool>`）
 
-`--agent <tool>` 只移除该工具的 teamai 资源（hooks、CLAUDE.md 块、skills、rules、团队同步的自定义 agents、内置 agents）。工具名即 `toolPaths` 的键（如 `claude`、`codex`、`codebuddy`），匹配大小写不敏感。传入未知工具名会直接报错并列出可用工具、不执行任何删除，并以非零状态码退出。
+`--agent <tool>` 只移除该工具的 teamai 资源（hooks、CLAUDE.md 块、skills、rules、团队同步的自定义 agents、内置 agents）。如果移除后工具根目录下只剩空目录（例如被清空的 `.cursor/skills/`），这些空壳也会一并清掉。工具名即 `toolPaths` 的键（如 `claude`、`codex`、`codebuddy`），匹配大小写不敏感。传入未知工具名会直接报错并列出可用工具、不执行任何删除，并以非零状态码退出。
 
 若该工具的指令文件还被其他已安装工具使用（project scope 下工作区根目录的 `AGENTS.md` 由 `zcode`、`codex`、`dsh`、`workbuddy`、`hermes` 共用），只移除其他工具不依赖的区块。例如只安装了 ZCode 和 WorkBuddy 时，`--agent zcode` 会剥掉规则区块，但保留 WorkBuddy 仍在读取的团队文化与共享指令区块。全量 `teamai uninstall` 会移除全部区块。
 
@@ -1933,7 +1935,7 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 
 **Q: 在项目里执行 `teamai init` 后没有 `.claude/`（或 `.cursor/`、`.codebuddy/`）目录？**
 
-这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录；用 `teamai init --agent <id>` 显式启用过的工具除外。
+这是预期行为。`init` 不知道你会打开哪个 Agent。在项目中打开 Claude Code / Cursor / CodeBuddy：SessionStart hook 会创建该工具的项目根目录并随后 pull。单独执行 `teamai pull` 不会为缺失的 Agent 根目录建目录。
 
 **Q: pull 显示 "Synced N skills"，但实际什么都没装上？**
 
@@ -1944,7 +1946,7 @@ teamai init --repo https://github.com/yourorg/yourrepo --force
 [project] No AI tool directories found under D:\work\myrepo - nothing was installed.
 ```
 
-两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents`，此后 pull 会为它创建目录。
+两种修法：打开一次该工具（它会自建目录，随后 SessionStart 触发 pull），或显式启用——`teamai init --agent kimi` 会把该工具写入 `enabledAgents` 并创建其目录，之后的 pull 会往里安装。
 
 **Q: pull 提示 `Kimi Code hooks skipped: ... does not exist`？**
 
@@ -1977,6 +1979,11 @@ teamai hooks inject  # 重新注入
 **Q: push 提示 "no new resources detected"？**
 
 `push` 只检测新增或修改的资源。没有变更时无需推送。
+
+直接在 Git 中删除或重命名 skill 后，本地可能留有旧副本。如果当前团队仓已无此名称，但本地团队 clone 的 Git 历史里存在过，`status` 会将其单独列为 **suspected skill leftover（疑似残留）**，默认 `push` 不再把它当作新资源。手动 `pull` 即使无需同步，也会列出这些名称；请检查所有本地副本，确认无用后再手动删除。此检查不会自动删除文件。真正的新 skill 行为不变。
+
+如果你有意复用了历史名称，检查内容后可运行 `teamai push --skill <skill目录路径>` 显式作为新资源提交，或改成团队历史中未出现过的名称。Tombstone、内置 skill、source skill 和 push-ignore 的排除行为保持不变。检测仅使用本地已有 Git 历史；浅克隆或 HTTP 快照可能缺少识别旧名称所需的证据。
+
 
 **Q: 如何删除已推送的资源？**
 

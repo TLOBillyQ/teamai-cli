@@ -47,7 +47,7 @@ plane accepts identity-bound events with separate retention and write permission
 | Current data | Current path / behavior | Proposed backend mapping |
 | --- | --- | --- |
 | `teamai.yaml` | Configuration, sharing policy, tool paths and reviewers (`src/config.ts`, `src/types.ts`) | Versioned policy/configuration records; reviewed changes generate a compatibility view |
-| `skills/` | SkillsHandler, namespaces and marketplace metadata | Resource bundles with immutable files, dependencies and generated marketplace views |
+| `skills/` | SkillsHandler, namespaces and marketplace metadata; Git history classifies suspected local leftovers for status/pull warnings and default push exclusion, without deleting them | Resource bundles with immutable files, dependencies and generated marketplace views |
 | `rules/` | RulesHandler and enforced-rule selection | Versioned rules with separately enforced policy constraints |
 | `docs/` | DocsHandler and indexed documentation | Versioned documents, authorized materialization and recall indexing |
 | `env/env.yaml` | EnvHandler, local overrides and environment injection | Non-secret templates plus secret references; secret resolution has separate authorization |

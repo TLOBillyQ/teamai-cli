@@ -572,6 +572,10 @@ async function pushCore(
   // Preserve blocked items in the full scan so their pending PR records survive.
   // Exclude them before selection and grouping: pushItem cannot write their paths.
   const allItems = fullScan.filter((item) => {
+    if (item.status === 'suspected-leftover') {
+      log.warn(`Skipped suspected skill leftover: ${item.name} (team repo deleted or renamed). To publish an intentional reuse, run teamai push --skill <path>.`);
+      return false;
+    }
     if (item.type === 'agents' && 'skipReason' in item
       && typeof item.skipReason === 'string' && item.skipReason) {
       log.warn(`[agents] Skipped ${item.name}: ${item.skipReason}`);

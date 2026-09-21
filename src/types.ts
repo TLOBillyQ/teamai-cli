@@ -749,7 +749,7 @@ export interface TagsConfig {
 
 export type ResourceType = 'skills' | 'rules' | 'docs' | 'env' | 'agents' | 'hooks' | 'mcp';
 
-export type ResourceItemStatus = 'new' | 'modified';
+export type ResourceItemStatus = 'new' | 'modified' | 'suspected-leftover';
 
 export interface ResourceItem {
   name: string;

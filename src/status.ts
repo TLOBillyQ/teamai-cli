@@ -6,7 +6,7 @@ import { assertSafeResourceName } from './utils/path-safety.js';
 import { log } from './utils/logger.js';
 import { getAllHandlers } from './resources/index.js';
 import { listDirs, listFilesRecursive, pathExists, readFileSafe } from './utils/fs.js';
-import { SkillsHandler } from './resources/skills.js';
+import { SkillsHandler, reportSkillLeftovers } from './resources/skills.js';
 import { DocsHandler } from './resources/docs.js';
 import { detectInstalledAgents, type ResolvedAgent } from './known-agents.js';
 import {
@@ -17,7 +17,7 @@ import {
   truncate,
   type AgentSkillsView,
 } from './agent-skills.js';
-import { RESOURCE_TYPES, LocalConfigSchema, getDataHome, type GlobalOptions, type ResourceType } from './types.js';
+import { RESOURCE_TYPES, LocalConfigSchema, getDataHome, type GlobalOptions, type ResourceItem, type ResourceType } from './types.js';
 import { projectsRootDir, readAnchorFile, projectSlug, legacyProjectSlug } from './utils/partition.js';
 import { maskEnvValue } from './resources/env.js';
 import { parseTeamMcpServers } from './resources/mcp.js';
@@ -125,8 +125,11 @@ export async function status(options: GlobalOptions): Promise<void> {
   console.log('');
   log.info('Local resources not yet pushed:');
   let anyNew = false;
+  const leftovers: ResourceItem[] = [];
   for (const handler of getAllHandlers()) {
-    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const scanned = await handler.scanLocalForPush(teamConfig, localConfig);
+    leftovers.push(...scanned.filter((item) => item.status === 'suspected-leftover'));
+    const items = scanned.filter((item) => item.status !== 'suspected-leftover');
     if (items.length > 0) {
       anyNew = true;
       console.log(`  [${handler.type}] ${items.length} new`);
@@ -139,6 +142,21 @@ export async function status(options: GlobalOptions): Promise<void> {
   }
   if (!anyNew) {
     console.log('  (none)');
+  }
+
+  reportSkillLeftovers(leftovers);
+
+  // Tools this scope no longer syncs to can still hold files from an earlier
+  // sync — name them so the leftover is discoverable instead of silently
+  // accumulating (issue #45).
+  const { findOrphanedAgentDirs, formatOrphanedAgentDir } = await import('./orphaned-agent-dirs.js');
+  const orphans = await findOrphanedAgentDirs(localConfig, teamConfig);
+  if (orphans.length > 0) {
+    console.log('');
+    log.info('Orphaned agent resources:');
+    for (const orphan of orphans) {
+      console.log(`  ${formatOrphanedAgentDir(orphan)}`);
+    }
   }
 
   console.log('');

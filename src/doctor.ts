@@ -161,6 +161,28 @@ async function buildEnabledToolChecks(ctx: DoctorContext): Promise<Check[]> {
 }
 
 /**
+ * Flag tools this scope no longer syncs to whose skills directory still holds
+ * files from an earlier sync (#45). The post-pull pass prints these dimmed
+ * (informational): a leftover is a cleanup opportunity, not a failed delivery.
+ * Only orphans are pushed as checks, and their `check` always fails — the
+ * filesystem scan already ran in `findOrphanedAgentDirs`, same as the delivery
+ * checks that stat during the build.
+ */
+async function buildOrphanedAgentDirChecks(ctx: DoctorContext): Promise<Check[]> {
+  const { localConfig, teamConfig } = ctx;
+  if (!teamConfig) return [];
+  const { findOrphanedAgentDirs, describeOrphanedAgentDir, orphanFix } = await import('./orphaned-agent-dirs.js');
+  const orphans = await findOrphanedAgentDirs(localConfig, teamConfig);
+  return orphans.map((orphan) => ({
+    name: describeOrphanedAgentDir(orphan),
+    source: 'local' as const,
+    informational: true,
+    check: async () => false,
+    fix: orphanFix(orphan),
+  }));
+}
+
+/**
  * Build hook checks for tools whose settings parent directory already exists
  * (i.e. the tool is installed). Tools that are not installed are skipped.
  */
@@ -433,6 +455,7 @@ export async function buildChecks(ctx: DoctorContext, stage: CheckStage = 'docto
         + 'can push to the team repo (run with --verbose to see the push error).',
     },
     ...await buildEnabledToolChecks(ctx),
+    ...await buildOrphanedAgentDirChecks(ctx),
     ...await buildHookChecks(toolPaths, baseDir, localConfig),
     ...await buildDeliveryChecks(ctx),
     // Built only for `doctor`: the work is in building these, not in running

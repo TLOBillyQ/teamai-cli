@@ -40,7 +40,7 @@
 | 现有数据 | 现有代码 / 行为 | 后端映射提案 |
 | --- | --- | --- |
 | `teamai.yaml` | 配置、共享策略、工具路径及审核人（`src/config.ts`、`src/types.ts`） | 版本化策略/配置记录；审核后的变更生成兼容视图 |
-| `skills/` | SkillsHandler、命名空间及 marketplace 元数据 | 不可变文件和依赖组成的资源包，派生 marketplace 视图 |
+| `skills/` | SkillsHandler、命名空间及 marketplace 元数据；Git 历史用于识别疑似本地残留，供 status/pull 提示及默认 push 排除，不自动删除 | 不可变文件和依赖组成的资源包，派生 marketplace 视图 |
 | `rules/` | RulesHandler 及强制规则选择 | 版本化规则，并单独执行强制策略约束 |
 | `docs/` | DocsHandler 及文档索引 | 版本化文档、授权物化及召回索引 |
 | `env/env.yaml` | EnvHandler、本地覆盖和环境注入 | 非密钥模板及密钥引用，解析密钥时单独授权 |

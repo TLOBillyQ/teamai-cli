@@ -37,7 +37,7 @@ import { BUILTIN_RULE_NAMES } from './builtin-rules.js';
 import { agentStemFromFilename } from './resources/agent-format.js';
 import { resolveDocsDestination } from './resources/docs.js';
 import { listTeamAgentDirs } from './resources/agents.js';
-import { ResourceHandler } from './resources/base.js';
+import { ResourceHandler, toolInstallRoot } from './resources/base.js';
 import {
   inlinesRulesIntoInstructions,
   instructionInstallRoot,
@@ -53,6 +53,7 @@ import {
   readJson,
   writeFile,
   remove,
+  pruneEmptyDirs,
   listDirs,
   listFiles,
   listFilesRecursive,
@@ -109,6 +110,9 @@ interface RemovalPlan {
   hermesCleanup: boolean;
   /** Kimi Code CLI user config.toml holding teamai `[[hooks]]` entries, when targeted and present. */
   kimiConfigPath: string | null;
+  /** Tool root directories (e.g. <base>/.cursor) whose removals may leave an
+   *  empty shell; pruned at the end if they ended up with no files at all. */
+  toolRootsToPrune: string[];
   /** Scope being uninstalled (issue #73: surfaced to the user). */
   scope: Scope;
 }
@@ -520,6 +524,21 @@ async function buildRemovalPlan(
     includeShared = true;
   }
 
+  // Tool roots whose resource removals may leave an empty shell behind (e.g.
+  // <base>/.cursor/skills with nothing else under .cursor). Recorded now and
+  // pruned after execution, only if they truly end up holding no files (#45).
+  const scopedPaths = scopedToolPaths(teamConfig, localConfig);
+  const toolRootsToPrune = [...new Set(
+    toolsToMerge
+      .map((tool) => {
+        const paths = scopedPaths[tool];
+        const anyPath = paths?.skills ?? paths?.rules ?? paths?.agents ?? paths?.settings ?? paths?.hooks;
+        if (!anyPath) return null;
+        return path.join(resolveToolBaseDir(tool, localConfig), toolInstallRoot(anyPath));
+      })
+      .filter((root): root is string => root !== null),
+  )];
+
   const plan: RemovalPlan = {
     hookFiles: [],
     openclawHookDirs: [],
@@ -537,6 +556,7 @@ async function buildRemovalPlan(
     includeShared,
     hermesCleanup: toolsToMerge.includes('hermes'),
     kimiConfigPath: null,
+    toolRootsToPrune,
     scope: localConfig.scope,
   };
 
@@ -941,6 +961,16 @@ async function executeRemoval(plan: RemovalPlan): Promise<void> {
     } catch (e) {
       log.warn(`Failed to remove docs: ${(e as Error).message}`);
     }
+  }
+
+  // (f2) Prune tool directories the removals above may have left as empty
+  // shells — a targeted uninstall must not leave <tool>/skills/ behind (#45).
+  // pruneEmptyDirs only ever removes directories holding no files at all, so a
+  // root the user still uses (own hooks, own skills) is left untouched.
+  for (const root of plan.toolRootsToPrune) {
+    try {
+      if (await pruneEmptyDirs(root)) log.success(`Removed empty directory: ${root}`);
+    } catch { /* best effort */ }
   }
 
   // (g) Remove ~/.teamai/ directory (last — earlier steps read from it)

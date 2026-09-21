@@ -1,5 +1,6 @@
 import path from 'node:path';
 import YAML from 'yaml';
+import { createGit } from '../utils/git.js';
 import { isToolInstalledForConfig, ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, DeliveryTarget, TeamaiConfig, LocalConfig } from '../types.js';
 import { getPushignorePath, isAgentExcluded, resolveToolBaseDir, scopedToolPaths } from '../types.js';
@@ -12,6 +13,16 @@ import { loadRolesManifest, resolveRoleResourceNamespaces } from '../roles.js';
 import { assertWithinRoot } from '../utils/path-safety.js';
 import { splitFrontmatter, stringifyFrontmatter } from '../utils/frontmatter.js';
 import { findDuplicateSkillNames, reportDuplicateSkills } from './skill-duplicates.js';
+
+/** Shared diagnostic for status and explicit pull; never removes local files. */
+export function reportSkillLeftovers(items: ResourceItem[]): void {
+  const leftovers = items.filter((item) => item.status === 'suspected-leftover');
+  if (leftovers.length === 0) return;
+  log.warn('Suspected skill leftovers (team repo deleted or renamed):');
+  console.log(`  [skills] ${leftovers.length} suspected leftover(s)`);
+  for (const item of leftovers) console.log(`    - ${item.name} (${item.sourcePath})`);
+  log.info('These skills are absent from the team repo. Review local copies and delete manually if no longer needed. To publish an intentional reuse, run teamai push --skill <path>.');
+}
 
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
@@ -441,6 +452,26 @@ export class SkillsHandler extends ResourceHandler {
       }
     }
 
+    // Query once per scan, only when absent names need classification. --relative
+    // also supports self-mode repositories whose resources live under .teamai/.
+    if ([...candidates.values()].some((item) => item.status === 'new')) {
+      try {
+        const deletedPaths = await createGit(localConfig.repo.localPath).raw([
+          'log', '--full-history', '-m', '--format=', '--name-only', '-z', '--relative', '--no-renames',
+          '--diff-filter=D', 'HEAD', '--', 'skills',
+        ]);
+        for (const deletedPath of deletedPaths.split('\0')) {
+          const match = /^skills\/(?:[^/]+\/)?([^/]+)\/SKILL\.md$/.exec(deletedPath.replace(/^\n+/, ''));
+          if (!match) continue;
+          const candidate = candidates.get(match[1]);
+          if (candidate?.status === 'new') candidate.status = 'suspected-leftover';
+        }
+      } catch (error) {
+        // HTTP snapshots and repositories without commits have no Git history.
+        log.debug(`Could not check skill history: ${(error as Error).message}`);
+      }
+    }
+
     // Convert candidates map to items array
     const items: ResourceItem[] = [];
     for (const [name, candidate] of candidates) {
@@ -456,8 +487,7 @@ export class SkillsHandler extends ResourceHandler {
       });
     }
 
-    // Push refuses a skill whose name is ambiguous in the team repo; every
-    // other candidate stays pushable.
+    // Report ambiguous names; callers separately exclude suspected leftovers.
     reportDuplicateSkills([...ambiguousSkills.values()].filter((d) => refusedSkills.has(d.name)));
 
     return items;

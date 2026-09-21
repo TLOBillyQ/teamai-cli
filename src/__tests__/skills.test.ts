@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import fse from 'fs-extra';
+import { execFileSync } from 'node:child_process';
 import { parseFrontmatter } from '../utils/frontmatter.js';
 
 vi.mock('../utils/logger.js', () => ({
@@ -74,6 +75,72 @@ scope: 'user',
     const item = items.find((i) => i.name === 'my-skill');
     expect(item).toBeDefined();
     expect(item!.status).toBe('new');
+  });
+
+  it('classifies a git-renamed skill as a suspected leftover, preserving genuinely new skills', async () => {
+    const repo = localConfig.repo.localPath;
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+    git('init', '-q');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    await fse.outputFile(path.join(repo, 'skills/old-name/SKILL.md'), '# Old');
+    git('add', '.');
+    git('commit', '-qm', 'Add skill');
+    git('mv', 'skills/old-name', 'skills/new-name');
+    git('commit', '-qm', 'Rename skill');
+    await fse.outputFile(path.join(homeDir, '.claude/skills/old-name/SKILL.md'), '# Old');
+    await fse.outputFile(path.join(homeDir, '.claude/skills/fresh/SKILL.md'), '# Fresh');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    expect(items.find((item) => item.name === 'old-name')?.status).toBe('suspected-leftover');
+    expect(items.find((item) => item.name === 'fresh')?.status).toBe('new');
+    expect(await fse.readFile(path.join(homeDir, '.claude/skills/old-name/SKILL.md'), 'utf8')).toBe('# Old');
+  });
+
+  it('treats a reused historical name as suspected even with different content in self mode', async () => {
+    const repo = localConfig.repo.localPath;
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+    git('init', '-q');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    localConfig.repo.localPath = path.join(repo, '.teamai');
+    await fse.outputFile(path.join(repo, '.teamai/skills/dev/reused/SKILL.md'), '# Previous purpose');
+    git('add', '.');
+    git('commit', '-qm', 'Add namespaced skill');
+    git('rm', '.teamai/skills/dev/reused/SKILL.md');
+    git('commit', '-qm', 'Delete skill');
+    await fse.ensureDir(localConfig.repo.localPath);
+    await fse.outputFile(path.join(homeDir, '.claude/skills/reused/SKILL.md'), '# New purpose');
+
+    expect(await handler.scanLocalForPush(teamConfig, localConfig)).toEqual([
+      expect.objectContaining({ name: 'reused', status: 'suspected-leftover' }),
+    ]);
+    // A subsequent repository revision restores the name: history must not
+    // override the current team tree or survive through a stale cache.
+    await fse.outputFile(path.join(repo, '.teamai/skills/dev/reused/SKILL.md'), '# New purpose');
+    git('add', '.');
+    git('commit', '-qm', 'Restore skill');
+    expect(await handler.scanLocalForPush(teamConfig, localConfig)).toEqual([]);
+  });
+
+  it('recognizes a historical skill removed by a merge resolution', async () => {
+    const repo = localConfig.repo.localPath;
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    git('commit', '--allow-empty', '-qm', 'Initial');
+    git('checkout', '-qb', 'feature');
+    await fse.outputFile(path.join(repo, 'skills/merge-deleted/SKILL.md'), '# Skill');
+    git('add', '.');
+    git('commit', '-qm', 'Add skill');
+    git('checkout', '-q', 'main');
+    git('merge', '-q', '--no-ff', '-s', 'ours', 'feature', '-m', 'Drop skill on merge');
+    await fse.outputFile(path.join(homeDir, '.claude/skills/merge-deleted/SKILL.md'), '# Skill');
+
+    expect(await handler.scanLocalForPush(teamConfig, localConfig)).toEqual([
+      expect.objectContaining({ name: 'merge-deleted', status: 'suspected-leftover' }),
+    ]);
   });
 
   it('should NOT detect a skill without SKILL.md', async () => {
