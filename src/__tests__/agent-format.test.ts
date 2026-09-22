@@ -495,14 +495,12 @@ describe('reverseFromOpencode', () => {
 // ─── renderForKimi / reverseFromKimi ─────────────────────────────────────────
 
 describe('renderForKimi', () => {
-  it('emits name/description and a YAML-list tools allowlist in Kimi ids', () => {
+  it('emits name/description and a YAML-list tools allowlist in current Kimi names', () => {
     const { ext, content } = renderForKimi(makeSpec({ tools: ['Read', 'Grep'] }));
     expect(ext).toBe('.md');
     expect(content).toContain('name: test-agent');
     expect(content).toContain('description: A test agent for unit tests');
-    // Kimi wants a YAML sequence of module:ClassName ids, not Claude's
-    // comma-separated short names.
-    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.file:ReadFile'\n  - 'kimi_cli\.tools\.file:Grep'/);
+    expect(content).toMatch(/tools:\n  - Read\n  - Grep/);
   });
 
   it('accepts the comma-separated tools string a Claude-format source (built-in teamai-recall) yields', () => {
@@ -511,18 +509,23 @@ describe('renderForKimi', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const { content } = renderForKimi(parsed.spec);
-    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.shell:Shell'\n  - 'kimi_cli\.tools\.file:ReadFile'\n  - 'kimi_cli\.tools\.file:Grep'\n  - 'kimi_cli\.tools\.file:Glob'/);
+    expect(content).toMatch(/tools:\n  - Bash\n  - Read\n  - Grep\n  - Glob/);
   });
 
   it('passes unknown tool names through unchanged (Kimi ids, MCP tools)', () => {
     const { content } = renderForKimi(makeSpec({ tools: ['Bash', 'kimi_cli.tools.think:Think', 'mcp__jira__search'] }));
-    expect(content).toMatch(/tools:\n  - 'kimi_cli\.tools\.shell:Shell'\n  - 'kimi_cli\.tools\.think:Think'\n  - mcp__jira__search/);
+    expect(content).toMatch(/tools:\n  - Bash\n  - 'kimi_cli\.tools\.think:Think'\n  - mcp__jira__search/);
     expect(content).toContain('You are a helpful assistant.');
   });
 
   it('does NOT emit model (Kimi has no such frontmatter field)', () => {
     const { content } = renderForKimi(makeSpec({ model: 'kimi-k2' }));
     expect(content).not.toMatch(/^model:/m);
+  });
+
+  it('preserves an explicit empty allowlist instead of granting every tool', () => {
+    expect(renderForKimi(makeSpec({ tools: [] })).content).toContain('tools: []');
+    expect(renderForKimi(makeSpec()).content).not.toMatch(/^tools:/m);
   });
 
   it('flattens tool_extras.kimi (whenToUse / disallowedTools) into frontmatter', () => {
@@ -532,6 +535,18 @@ describe('renderForKimi', () => {
     expect(content).toMatch(/disallowedTools:\n  - Bash/);
   });
 
+  it('normalizes legacy allow/deny overrides without changing MCP patterns or unknown names', () => {
+    const spec = makeSpec({ tools: ['Write'], tool_extras: { kimi: {
+      tools: 'kimi_cli.tools.file:ReadFile, Task, mcp__jira__*, CustomTool',
+      disallowedTools: ['kimi_cli.tools.shell:Shell', 'Task'],
+    } } });
+    const { content } = renderForKimi(spec);
+    expect(content).toMatch(/tools:\n  - Read\n  - Agent\n  - mcp__jira__\*\n  - CustomTool/);
+    expect(content).toMatch(/disallowedTools:\n  - Bash\n  - Agent/);
+    expect(content).not.toContain('kimi_cli');
+    expect(content).not.toContain('Write');
+  });
+
   it('renderForTool dispatches kimi to renderForKimi', () => {
     const spec = makeSpec();
     expect(renderForTool(spec, 'kimi')).toEqual(renderForKimi(spec));
@@ -539,6 +554,15 @@ describe('renderForKimi', () => {
 });
 
 describe('reverseFromKimi', () => {
+  it('retains comma-separated permissions through reverse and render', () => {
+    const result = reverseFromKimi('/agents/a.md', '---\ndescription: d\ntools: kimi_cli.tools.file:ReadFile, mcp__jira__*\ndisallowedTools: kimi_cli.tools.shell:Shell\n---\nBody\n');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.tools).toEqual(['Read', 'mcp__jira__*']);
+    const { content } = renderForKimi(result.spec);
+    expect(content).toMatch(/tools:\n  - Read\n  - mcp__jira__\*/);
+    expect(content).toMatch(/disallowedTools:\n  - Bash/);
+  });
   it('reads name/description/tools and namespaces the rest under tool_extras.kimi', () => {
     const content = `---\nname: reviewer\ndescription: Strict reviewer\ntools:\n  - Read\nsubagents:\n  - coder\n---\nReview the diff.\n`;
     const result = reverseFromKimi('/agents/reviewer.md', content);

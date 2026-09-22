@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.24.5](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.24.4...gitea-v0.24.5) (2026-09-22)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Fix #56: render current Kimi Markdown agent tool names so recall subagents can execute knowledge searches.
+- Refresh legacy tool identifiers on pull and reverse sync while preserving empty allowlists, unknown names and MCP patterns.
+- After upgrading, run `teamai pull --force` to refresh installed agents.
+
 ## [0.24.4](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.24.3...gitea-v0.24.4) (2026-09-22)
 
 ### Gitea build (`@agent/teamai-cli`)

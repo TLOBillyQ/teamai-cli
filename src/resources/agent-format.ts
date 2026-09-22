@@ -396,19 +396,9 @@ export function renderForOpencode(spec: AgentSpec): RenderResult {
 }
 
 /**
- * Render an AgentSpec for Kimi Code CLI.
- * Output: YAML frontmatter (.md) with name/description and a YAML-list `tools`
- * allowlist, matching Kimi's documented agent file format. Kimi has no `model`
- * frontmatter field, so the common `model` is not emitted. Kimi-only fields
- * (whenToUse / disallowedTools / subagents / override) travel in
- * tool_extras.kimi and are flattened into the frontmatter.
- */
-/**
- * Kimi addresses built-in tools by `module:ClassName`, not by the short names
- * Claude-style agent specs use. Without this map a spec (or the built-in
- * teamai-recall agent) saying `tools: [Bash, Read]` would hand Kimi an
- * allowlist of names it does not know. Names outside the map pass through
- * untouched so teams can write Kimi ids or MCP tools directly.
+ * Previous TeamAI Markdown output incorrectly used legacy Python tool ids.
+ * Keep these aliases only to migrate existing specs; current Kimi Markdown
+ * uses short names. Unknown names and MCP patterns retain their exact spelling.
  */
 const KIMI_TOOL_IDS: Record<string, string> = {
   Bash: 'kimi_cli.tools.shell:Shell',
@@ -435,7 +425,8 @@ function normalizeToolList(tools: unknown): string[] {
 }
 
 export function toKimiToolId(tool: string): string {
-  return KIMI_TOOL_IDS[tool] ?? tool;
+  const name = fromKimiToolId(tool);
+  return name === 'Task' ? 'Agent' : name;
 }
 
 export function fromKimiToolId(id: string): string {
@@ -450,14 +441,20 @@ export function renderForKimi(spec: AgentSpec): RenderResult {
   // Claude-style sources carry `tools: Bash, Read` as one comma-separated
   // string, and reverseFromClaude passes that through untouched despite the
   // string[] type, so accept both shapes here.
-  const tools = normalizeToolList(spec.tools);
-  if (tools.length > 0) {
-    frontmatterData['tools'] = tools.map(toKimiToolId);
+  if (spec.tools !== undefined) {
+    frontmatterData['tools'] = spec.tools;
   }
   const extras = spec.tool_extras?.['kimi'];
   if (extras) {
     for (const [key, value] of Object.entries(extras)) {
       frontmatterData[key] = value;
+    }
+  }
+  // Normalize after extras so private allow/deny overrides follow the same
+  // migration rules. Preserve []: omitting an allowlist grants every tool.
+  for (const key of ['tools', 'disallowedTools']) {
+    if (frontmatterData[key] !== undefined) {
+      frontmatterData[key] = normalizeToolList(frontmatterData[key]).map(toKimiToolId);
     }
   }
   const content = matter.stringify(spec.instructions, frontmatterData);
@@ -837,7 +834,7 @@ export function reverseFromKimi(filePath: string, content: string): ReverseResul
     description: fm['description'] as string,
     instructions: body,
   };
-  if (Array.isArray(fm['tools'])) spec.tools = (fm['tools'] as string[]).map(fromKimiToolId);
+  if (fm['tools'] !== undefined) spec.tools = normalizeToolList(fm['tools']).map(fromKimiToolId);
   if (Object.keys(extras).length > 0) spec.tool_extras = { kimi: extras };
 
   return { ok: true, spec };
