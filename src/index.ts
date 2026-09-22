@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { Command, Option } from 'commander';
-import { setVerbose, setSilent, log } from './utils/logger.js';
+import { setVerbose, setSilent, setFileLogging, log } from './utils/logger.js';
 import type { GlobalOptions, LocalConfig } from './types.js';
 import { TEAMAI_HOOK_SUBCOMMANDS } from './hooks.js';
 import { registerPackagesCommand } from './pkg/register-command.js';
@@ -37,6 +37,7 @@ program
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
+    if (actionCommand.name() === 'uninstall' && opts.dryRun) setFileLogging(false);
     if (opts.verbose) setVerbose(true);
 
     // Auto-migrate a legacy `<repo>/.teamai/` into the partition before the

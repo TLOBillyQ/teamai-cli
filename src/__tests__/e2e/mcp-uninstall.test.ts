@@ -130,6 +130,7 @@ describe('MCP uninstall (e2e)', () => {
     const afterUninstall = JSON.parse(fs.readFileSync(claudeJson, 'utf-8'));
     expect(afterUninstall.mcpServers['team-mcp']).toBeUndefined();
     expect(afterUninstall.mcpServers['my-own']).toEqual({ command: 'my-server' });
-    expect(fs.existsSync(teamaiHome)).toBe(false);
+    expect(fs.existsSync(teamaiHome)).toBe(true);
+    expect(fs.existsSync(path.join(teamaiHome, 'config.yaml'))).toBe(false);
   }, 60_000);
 });

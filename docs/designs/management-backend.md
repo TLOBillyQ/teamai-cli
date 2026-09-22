@@ -159,6 +159,8 @@ uninstall revoke credentials and clear local credentials, indexes and managed
 state without deleting unrelated user files. If offline, local cleanup completes
 and remote revocation remains visibly pending until submitted or done in the console.
 
+Current Git CLI boundary (issue #55): `uninstall` retires only the active binding. It preserves shared credentials, caches, project partitions, docs and machine-wide dispatchers; credential revocation above is a future management-backend operation, not a fallback directory deletion. Invalid configuration authorizes no cleanup.
+
 **J4: administrator publishes across projects.** An administrator prepares a
 change set for several projects in the same organization, sees effective-resource
 diffs and affected members, and submits it. Reviewers approve the exact versions;

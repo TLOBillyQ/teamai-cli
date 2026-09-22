@@ -212,10 +212,14 @@ export function projectDataHome(anchor: string): string {
  * rewrite is idempotent, so it also finishes an adoption that crashed between
  * the rename and the config rewrite.
  */
-export async function resolvePartitionDir(anchor: string): Promise<string> {
+export async function resolvePartitionDir(anchor: string, opts: { readOnly?: boolean } = {}): Promise<string> {
   const canonical = projectDataHome(anchor);
   const legacyDir = path.join(projectsRootDir(), legacyProjectSlug(anchor));
   if (legacyDir === canonical) return canonical; // whole-path prefix == basename (root-level anchor)
+  if (opts.readOnly) {
+    const entries = await fs.promises.readdir(canonical).catch(() => []);
+    return entries.length > 0 || !await dirExists(legacyDir) ? canonical : legacyDir;
+  }
   const dir = await adoptLegacyPartition(canonical, legacyDir);
   if (dir === canonical) await rebaseLocalPathAfterAdoption(canonical, legacyDir);
   return dir;

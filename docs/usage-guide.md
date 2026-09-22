@@ -1529,7 +1529,7 @@ Kiro is available as a built-in target. TeamAI deploys skills, rules, and subage
 ZCode is available as a built-in target. Skills deploy to `.zcode/skills/` (ZCode also reads the central `~/.agents/skills/`, which the `agents` entry covers), and subagents deploy as Claude-style Markdown to `.zcode/agents/`. Hooks are merged into the shared `~/.zcode/cli/config.json`, preserving unrelated keys such as plugin state. Two ZCode specifics the writer handles for you:
 
 - Config-file hooks are **disabled by default** in ZCode — TeamAI forces `hooks.enabled: true` so the entries it writes actually fire.
-- On Windows, hook entries launch through a hidden **wscript VBS launcher** (`wscript.exe <teamai-hook-dispatch.vbs> <dispatch tail>`): wscript is a GUI-subsystem binary, so hook runs never flash a console window, and the launcher spools STDIN to a temp file so the payload reaches `hook-dispatch`. Timeouts are network-scale per event (180s session start, 60s stop / prompt submit, 30s post-tool-use) so a session-start dispatch carrying a repo pull is not killed mid-flight. Payloads containing multi-byte text may degrade at the launcher's ANSI-codepage spool step — identity fields are salvaged so degraded dispatches stay linked to the session; uninstall removes both the entries and the script.
+- On Windows, hook entries launch through a hidden **wscript VBS launcher** (`wscript.exe <teamai-hook-dispatch.vbs> <dispatch tail>`): wscript is a GUI-subsystem binary, so hook runs never flash a console window, and the launcher spools STDIN to a temp file so the payload reaches `hook-dispatch`. Timeouts are network-scale per event (180s session start, 60s stop / prompt submit, 30s post-tool-use) so a session-start dispatch carrying a repo pull is not killed mid-flight. Payloads containing multi-byte text may degrade at the launcher's ANSI-codepage spool step — identity fields are salvaged so degraded dispatches stay linked to the session; uninstall preserves the shared dispatcher entries and script for other bindings.
 - On POSIX, entries are plain `bash -lc <dispatch>` argv vectors and the launcher is not written; on both platforms the command tail is stored verbatim as the entry's last argv element, which is what managed-entry detection and the managed-hooks manifest match against.
 
 These paths are verified against the ZCode desktop app: profiles created in its Subagents settings page land in `~/.zcode/agents/*.md`, and files placed there (e.g. by TeamAI) show up in the page's installed list. MCP servers deploy to `~/.agents/mcp.json` (user scope, Claude `mcpServers` shape — the same file ZCode's own MCP settings page reads). Project scope is not wired: ZCode stores workspace MCP under a different key (`mcp.servers` inside `.zcode/config.json`), which the Claude writer cannot emit.
@@ -1538,7 +1538,7 @@ These paths are verified against the ZCode desktop app: profiles created in its 
 
 ### Oh My Pi
 
-Oh My Pi (OMP) is available as a built-in target. TeamAI deploys skills, rules, and subagents to OMP's native directories — `.omp/skills/`, `.omp/rules/`, and `.omp/agents/` at project scope, and `~/.omp/agent/skills/`, `~/.omp/agent/rules/`, and `~/.omp/agent/agents/` at user scope (user-scope resources live under the agent directory `~/.omp/agent/`, a different prefix from the project one, so TeamAI switches prefixes with the scope). Instructions (`claudemd`) deploy to the matching `AGENTS.md`, and MCP servers merge into `~/.omp/agent/mcp.json` / `<project>/.omp/mcp.json` (Claude `mcpServers` shape — see the MCP section above). Skills are one-level `<name>/SKILL.md` bundles and TeamAI fills in a `description` on sync, which OMP's native skill provider requires to discover a skill. These paths follow OMP's documented discovery layout (verified against OMP 18.2.5). Hooks ride OMP's extension runner: `teamai pull` writes a single generated extension to `~/.omp/agent/extensions/teamai-hooks.ts` (never a project copy — OMP auto-loads both roots and would double-dispatch every event), which forwards OMP's `session_start` / `session_stop` / `before_agent_start` / `tool_result` events to the same `teamai hook-dispatch` entry point every other agent uses, gated on the session `cwd`. The `session_stop` handler returns nothing, so a dispatch can never force a session continuation, and there is no matcher-scoped post-tool-use pass because OMP's tool ids are lowercase (`bash`, `read`, …) and it has no `Skill` / `TodoWrite` tool. `teamai uninstall` removes the extension. OMP profiles (`OMP_PROFILE` / `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`), which relocate the agent directory, are not supported; the default `~/.omp/agent/` layout is used.
+Oh My Pi (OMP) is available as a built-in target. TeamAI deploys skills, rules, and subagents to OMP's native directories — `.omp/skills/`, `.omp/rules/`, and `.omp/agents/` at project scope, and `~/.omp/agent/skills/`, `~/.omp/agent/rules/`, and `~/.omp/agent/agents/` at user scope (user-scope resources live under the agent directory `~/.omp/agent/`, a different prefix from the project one, so TeamAI switches prefixes with the scope). Instructions (`claudemd`) deploy to the matching `AGENTS.md`, and MCP servers merge into `~/.omp/agent/mcp.json` / `<project>/.omp/mcp.json` (Claude `mcpServers` shape — see the MCP section above). Skills are one-level `<name>/SKILL.md` bundles and TeamAI fills in a `description` on sync, which OMP's native skill provider requires to discover a skill. These paths follow OMP's documented discovery layout (verified against OMP 18.2.5). Hooks ride OMP's extension runner: `teamai pull` writes a single generated extension to `~/.omp/agent/extensions/teamai-hooks.ts` (never a project copy — OMP auto-loads both roots and would double-dispatch every event), which forwards OMP's `session_start` / `session_stop` / `before_agent_start` / `tool_result` events to the same `teamai hook-dispatch` entry point every other agent uses, gated on the session `cwd`. The `session_stop` handler returns nothing, so a dispatch can never force a session continuation, and there is no matcher-scoped post-tool-use pass because OMP's tool ids are lowercase (`bash`, `read`, …) and it has no `Skill` / `TodoWrite` tool. `teamai uninstall` preserves the shared extension for project dispatch. OMP profiles (`OMP_PROFILE` / `PI_CODING_AGENT_DIR` / `PI_CONFIG_DIR`), which relocate the agent directory, are not supported; the default `~/.omp/agent/` layout is used.
 
 ### JoyCode
 
@@ -1928,7 +1928,7 @@ If only one marker of a pair is left in a file (for example after a hand edit), 
 
 ## Uninstall
 
-`teamai uninstall` intelligently cleans up all teamai-managed resources, **preserving anything you created yourself**.
+`teamai uninstall` retires the active binding (project scope when detected in the current directory, otherwise user scope). **It never recursively deletes the data home.** Run from HOME to leave a user binding, and check the scope shown by `--dry-run` first.
 
 ```bash
 # Preview every managed path that will be removed (no actual changes)
@@ -1945,13 +1945,15 @@ teamai uninstall --agent claude
 ```
 
 What gets removed:
-- teamai hooks in AI tool settings
+- Team hook entries recorded for this binding; shared dispatchers and other projects' team hooks remain
 - The teamai managed blocks in tool instruction files such as CLAUDE.md / AGENTS.md (see [Managed block markers](#managed-block-markers); your own content is preserved)
 - Team-synced skills, including OpenClaw workspace skills (your own skills are preserved)
 - Team-synced rules
 - Team-synced custom agents and CLI built-in agents (your own agents are preserved)
 - The env block in your shell profile — every candidate file (`.zshrc`, `.bashrc`, `.bash_profile`, `.bash_login`, `.profile`) carrying a block that sources this scope's own `env.sh` is cleaned, not only the one file `pull` would choose today; a block sourcing a different scope's `env.sh` is left alone
-- The `~/.teamai/` directory
+- This binding's `config.yaml` and generated `env.sh`
+
+Project partitions, caches, credentials, repository clones, docs, local-agent plugins and unowned data are retained. Shared hook dispatchers and their runtime dependencies are kept because legacy projects may also use them. Missing, corrupt or unreadable configuration causes no deletion; `--agent` then fails because tool ownership cannot be established. A repeated full uninstall is safe.
 
 ### Uninstall a single tool (`--agent <tool>`)
 
@@ -1959,7 +1961,7 @@ What gets removed:
 
 When the tool's instructions file is also used by another installed tool (the workspace-root `AGENTS.md` is shared by `zcode`, `codex`, `dsh`, `workbuddy` and `hermes` in project scope), only the blocks that the other tools do not depend on are removed. For example, with only ZCode and WorkBuddy installed, `--agent zcode` strips the rules block but keeps the culture and shared-instructions blocks WorkBuddy still reads. A full `teamai uninstall` removes every block.
 
-Shared resources (the env block, docs directory, and `~/.teamai/`) are removed **only when the target itself has teamai resources AND is the last tool still using teamai** — otherwise they are kept for the remaining tools. (So targeting a tool that has no teamai resources of its own is a no-op and leaves shared resources in place, even if it happens to be the only tool.)
+The binding files and its shell profile env block are removed only when the selected tool has resources and is the last enabled tool. Otherwise the binding remains for other tools. Neither branch removes shared project data or machine-wide dispatchers.
 
 The exclusion is durable: `uninstall --agent <tool>` drops the tool from `enabledAgents` and records it in `disabledAgents`, so a later `pull` (or another tool's session-start hook) will not resurrect its skills, rules, agents, CLAUDE.md block, or hooks. Running `init --agent <tool>` again clears the exclusion and re-enables sync for that tool.
 

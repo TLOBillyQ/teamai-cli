@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.24.4](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.24.3...gitea-v0.24.4) (2026-09-22)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Fix #55: uninstall retires the active binding without recursively deleting shared data, project partitions, caches, credentials, repository clones or personal content.
+- Preserve shared hook dispatchers and runtime dependencies; remove only the current scope's recorded team hooks, including targeted last-tool uninstall.
+- Leave data untouched when configuration is invalid, and keep uninstall previews free of configuration migrations and debug-log writes.
+
 ## [0.24.3](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.24.2...gitea-v0.24.3) (2026-09-22)
 
 ### Gitea build (`@agent/teamai-cli`)
