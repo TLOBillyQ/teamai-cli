@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.25.2](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.25.1-gitea.1...gitea-v0.25.2) (2026-09-24)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Fix [#63](http://lzxsvn:3000/agent/teamai-cli/issues/63): compare prerelease identifiers by semver precedence so `teamai update` detects newer `-gitea.N` versions.
+
 ## [0.25.1-gitea.1](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.25.1-gitea.0...gitea-v0.25.1-gitea.1) (2026-09-24)
 
 ### Gitea build (`@agent/teamai-cli`)
