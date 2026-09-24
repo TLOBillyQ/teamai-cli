@@ -1047,6 +1047,40 @@ describe('RulesHandler.pullAllRules — Codex inline rules', () => {
     expect(content.match(/\[teamai:rules:start\]/g)).toHaveLength(1);
     expect(content.match(/rule A/g)).toHaveLength(1);
   });
+
+  it('does not copy team rules to Claude when root CLAUDE.md imports inlined AGENTS.md', async () => {
+    await fse.ensureDir(path.join(projectRoot, '.codex'));
+    const claudeRules = path.join(projectRoot, '.claude', 'rules');
+    await fse.ensureDir(claudeRules);
+    await fse.writeFile(path.join(projectRoot, 'CLAUDE.md'), '@AGENTS.md\n');
+    await teamRule('coding', '# Coding\nUse tabs.');
+    await fse.writeFile(path.join(claudeRules, 'coding.md'), 'old team copy');
+    await fse.writeFile(path.join(claudeRules, 'teamai-recall.md'), 'built-in rule');
+
+    await handler.pullAllRules(teamConfig, projectConfig());
+
+    expect(await fse.readFile(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('# Coding\nUse tabs.');
+    expect(await fse.pathExists(path.join(claudeRules, 'coding.md'))).toBe(false);
+    expect(await fse.readFile(path.join(claudeRules, 'teamai-recall.md'), 'utf8')).toBe('built-in rule');
+    const targets = await handler.deliveryTargets(teamConfig, projectConfig(), (await handler.scanTeamForPull(teamConfig, projectConfig()))[0]);
+    expect(targets.some((target) => target.tool === 'claude')).toBe(false);
+
+    await fse.writeFile(path.join(projectRoot, 'CLAUDE.md'), '# Claude instructions\n');
+    await handler.pullAllRules(teamConfig, projectConfig());
+    expect(await fse.readFile(path.join(claudeRules, 'coding.md'), 'utf8')).toBe('# Coding\nUse tabs.');
+  });
+
+  it('keeps Claude rules when AGENTS.md is not receiving an inline block', async () => {
+    const claudeRules = path.join(projectRoot, '.claude', 'rules');
+    await fse.ensureDir(claudeRules);
+    await fse.writeFile(path.join(projectRoot, 'CLAUDE.md'), '@AGENTS.md\n');
+    await teamRule('coding', '# Coding');
+
+    await handler.pullAllRules(teamConfig, projectConfig());
+
+    expect(await fse.pathExists(path.join(projectRoot, 'AGENTS.md'))).toBe(false);
+    expect(await fse.readFile(path.join(claudeRules, 'coding.md'), 'utf8')).toBe('# Coding');
+  });
 });
 
 describe('RulesHandler — Cursor-compatible .mdc handling', () => {

@@ -87,6 +87,33 @@ describe('DSH project rules through pull and uninstall (#47)', () => {
     expect(fs.readFileSync(path.join(project, '.kimi-code/AGENTS.md'), 'utf8')).toContain('Keep all team instructions.');
   });
 
+  it('loads project rules once in Claude when CLAUDE.md imports AGENTS.md (#58)', () => {
+    enable(['claude', 'codex']);
+    fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Claude instructions\n');
+    const claudeRules = path.join(project, '.claude/rules');
+    fs.mkdirSync(claudeRules, { recursive: true });
+    fs.writeFileSync(path.join(claudeRules, 'teamai-recall.md'), 'built-in rule');
+
+    cli('pull', '--force');
+    expect(fs.existsSync(path.join(claudeRules, 'first.md'))).toBe(true);
+    fs.writeFileSync(path.join(project, 'CLAUDE.md'), '@AGENTS.md\n');
+    cli('pull');
+    rules();
+    expect(fs.existsSync(path.join(claudeRules, 'first.md'))).toBe(false);
+    expect(fs.existsSync(path.join(claudeRules, 'second.md'))).toBe(false);
+    expect(fs.readFileSync(path.join(claudeRules, 'teamai-recall.md'), 'utf8')).toBe('built-in rule');
+
+    fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Personal notes\n');
+    cli('pull');
+    rules();
+    expect(fs.existsSync(path.join(claudeRules, 'first.md'))).toBe(false);
+
+    fs.writeFileSync(path.join(project, 'CLAUDE.md'), '# Claude instructions\n');
+    cli('pull');
+    expect(fs.readFileSync(path.join(claudeRules, 'first.md'), 'utf8')).toContain('Always explain the change.');
+    expect(fs.readFileSync(path.join(claudeRules, 'second.md'), 'utf8')).toContain('Keep all team instructions.');
+  });
+
   it.each([
     ['codex', 'dsh'], ['dsh', 'codex'], ['zcode', 'dsh'], ['dsh', 'zcode'],
   ])('preserves the shared block when uninstalling %s while %s remains', (removed, remaining) => {

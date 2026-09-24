@@ -1467,6 +1467,8 @@ Codex 只从 `AGENTS.md` 读取指令：全局的 `~/.codex/AGENTS.md`，以及�
 
 Codex、ZCode、DSH 共用一个规则区块。从 `enabledAgents` 移除 Codex 或 Claude 后执行 `pull --force`，只要仍启用 DSH，该区块就会保留。`uninstall --agent dsh` 保留其他已安装工具仍在使用的区块；DSH 是最后一个规则认领者时，既有移除计划会列出并删除规则区块。团队最后一条规则删除后，该区块也会被移除。
 
+当项目根目录的 `CLAUDE.md` 通过 `@AGENTS.md` 引用了 `AGENTS.md`，且已启用的工具把团队规则内联到该文件时，Claude 已经通过引用读取这些规则。此时 `pull` 会删除 `.claude/rules/` 中对应的团队规则副本，并且不再复制；Claude 的内置规则仍然保留。移除引用，或不再有已启用工具向 `AGENTS.md` 内联规则时，团队规则会重新复制到 `.claude/rules/`。如果只是在本地删除受管区块，而内联工具仍启用，下次 pull 会恢复该区块。
+
 ### Kimi Code CLI
 
 Kimi Code CLI 是内置目标（`--agent kimi`），与其他工具一样通过 `~/.kimi-code` 探测。它的项目级目录会被原生扫描，但它**没有 rules 目录**，且不会展开 `AGENTS.md` 里的 `@file` 引用，因此 teamai 做了适配：

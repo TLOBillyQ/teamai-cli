@@ -1508,6 +1508,8 @@ Enable DeepSeek Harness explicitly with `--agent dsh`. In project scope, skills 
 
 Codex, ZCode and DSH share a single rules block. Removing Codex or Claude from `enabledAgents` and running `pull --force` preserves it while DSH remains enabled. `uninstall --agent dsh` preserves blocks used by another installed tool; when DSH is the last rules owner, the existing removal plan lists and removes the rules block. Removing the team's last rule also removes the block.
 
+When project-root `CLAUDE.md` references `@AGENTS.md` and an enabled tool inlines team rules into that `AGENTS.md`, Claude already receives those rules through the reference. In this case, `pull` removes the matching team rule copies from `.claude/rules/` and does not copy them again. Claude still receives its built-in rules. Team rules return to `.claude/rules/` if the reference is removed or no enabled tool inlines them into `AGENTS.md`. If the managed block is deleted locally while an inline tool remains enabled, the next pull restores it.
+
 ### Kimi Code CLI
 
 Kimi Code CLI is a built-in target (`--agent kimi`), detected from `~/.kimi-code` like the other tools. Its project-level layout is scanned natively, but it has **no rules directory** and does not expand `@file` references in `AGENTS.md`, so teamai adapts:

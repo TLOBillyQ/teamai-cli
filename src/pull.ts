@@ -1054,6 +1054,16 @@ async function pullForScope(
           // upgrade may add a new target file while the team repo SHA and tool
           // target set remain unchanged.
           await syncManagedInstructions(freshConfig, localConfig, roleContext, scopeLabel);
+          // CLAUDE.md can start or stop importing the project AGENTS.md without
+          // changing the team repo revision. Reconcile Claude's rule copies on
+          // this fast path too, including after a CLI upgrade.
+          if (resourceTypes.includes('rules') && localConfig.scope === 'project') {
+            const rulesHandler = getHandler('rules') as RulesHandler;
+            const { items } = await resolveDesiredRules(freshConfig, localConfig, roleContext);
+            if (await rulesHandler.needsClaudeProjectRuleRefresh(freshConfig, localConfig, items)) {
+              await rulesHandler.pullAllRules(freshConfig, localConfig, items);
+            }
+          }
           // Also refresh the CLAUDE.md recall block so a CLI upgrade that ships
           // a new block reaches CLAUDE.md even when the repo HEAD is unchanged.
           await injectRecallBlockIntoTools(freshConfig, localConfig, scopeLabel);

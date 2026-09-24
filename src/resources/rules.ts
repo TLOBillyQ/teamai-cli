@@ -208,9 +208,11 @@ export class RulesHandler extends ResourceHandler {
     // the render belongs here rather than in a second copy inside `doctor`.
     const source = await readFileSafe(item.sourcePath);
     const targets: DeliveryTarget[] = [];
+    const claudeUsesProjectRules = await this.claudeUsesInlinedProjectRules(teamConfig, localConfig);
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (isAgentExcluded(localConfig, tool)) continue;
       if (!toolPath.rules) continue;
+      if (tool === 'claude' && claudeUsesProjectRules) continue;
 
       // Skip tools that are not installed
       if (!await isToolInstalledForConfig(tool, toolPath.rules, localConfig)) {
@@ -327,6 +329,17 @@ export class RulesHandler extends ResourceHandler {
     // return so the block disappears when the team's last rule is removed.
     await this.inlineRulesIntoInstructionFiles(teamConfig, localConfig, rules);
     await this.removeLegacyInlineRuleCopies(teamConfig, localConfig, rules);
+
+    // Claude loads the root AGENTS.md through @AGENTS.md. Remove team rule
+    // copies from its rules directory when that file already has the same block.
+    if (await this.claudeUsesInlinedProjectRules(teamConfig, localConfig)) {
+      const claudeRules = scopedToolPaths(teamConfig, localConfig).claude?.rules;
+      if (claudeRules) {
+        const dir = path.join(resolveBaseDir(localConfig), claudeRules);
+        for (const rule of rules) await remove(path.join(dir, `${rule.name}.md`));
+        await this.removeEmptyDirs(dir);
+      }
+    }
 
     // Empty set = the team has no rules right now. We deliberately do NOT run the
     // aggressive stale-file cleanup below in that case, because it would treat a
@@ -534,6 +547,36 @@ export class RulesHandler extends ResourceHandler {
       targets.push({ tool, filePath: path.join(baseDir, toolPath.claudemd) });
     }
     return targets;
+  }
+
+  private async claudeUsesInlinedProjectRules(
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+  ): Promise<boolean> {
+    if (localConfig.scope !== 'project' || isAgentExcluded(localConfig, 'claude')) return false;
+    const root = resolveBaseDir(localConfig);
+    const claudeMd = await readFileSafe(path.join(root, 'CLAUDE.md'));
+    if (!claudeMd || !/(^|\s)@AGENTS\.md(?=\s|$)/m.test(claudeMd)) return false;
+    const agentsMd = path.join(root, 'AGENTS.md');
+    if (!(await this.inlineRuleTargets(teamConfig, localConfig)).some((target) => target.filePath === agentsMd)) return false;
+    return (await readFileSafe(agentsMd))?.includes(TEAMAI_RULES_START) ?? false;
+  }
+
+  /** Whether local Claude rule copies need reconciling after a skipped pull. */
+  async needsClaudeProjectRuleRefresh(
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+    rules: ResourceItem[],
+  ): Promise<boolean> {
+    const claudeRules = scopedToolPaths(teamConfig, localConfig).claude?.rules;
+    if (localConfig.scope !== 'project' || !claudeRules || isAgentExcluded(localConfig, 'claude')
+      || !await isToolInstalledForConfig('claude', claudeRules, localConfig)) return false;
+    const inlined = await this.claudeUsesInlinedProjectRules(teamConfig, localConfig);
+    const dir = path.join(resolveBaseDir(localConfig), claudeRules);
+    for (const rule of rules) {
+      if (await pathExists(path.join(dir, `${rule.name}.md`)) === inlined) return true;
+    }
+    return false;
   }
 
   /**
