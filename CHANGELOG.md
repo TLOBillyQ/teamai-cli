@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.25.1-gitea.1](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.25.1-gitea.0...gitea-v0.25.1-gitea.1) (2026-09-24)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Fix [#58](http://lzxsvn:3000/agent/teamai-cli/issues/58): when project `CLAUDE.md` imports `@AGENTS.md`, avoid loading the same team rules again from `.claude/rules/`. Reconcile existing copies on pull and restore them when the import is removed. Claude's built-in rules remain available.
+
 ## [0.25.1-gitea.0](http://lzxsvn:3000/agent/teamai-cli/compare/v0.25.0...gitea-v0.25.1-gitea.0) (2026-09-24)
 
 ### Gitea build (`@agent/teamai-cli`)
