@@ -230,8 +230,14 @@ describe('compareVersions', () => {
     expect(compareVersions('1.3.0-alpha.0', '1.3.0')).toBe(-1);
   });
 
-  it('should treat two prereleases with same core as equal (no deep prerelease ordering)', () => {
-    expect(compareVersions('1.2.3-beta.1', '1.2.3-beta.2')).toBe(0);
+  it('should compare prerelease identifiers by semver precedence', () => {
+    expect(compareVersions('0.25.1-gitea.0', '0.25.1-gitea.1')).toBe(-1);
+    expect(compareVersions('0.25.1-gitea.9', '0.25.1-gitea.10')).toBe(-1);
+    expect(compareVersions('1.2.3-beta.2', '1.2.3-beta.1')).toBe(1);
+    expect(compareVersions('1.2.3-alpha', '1.2.3-alpha.1')).toBe(-1);
+    expect(compareVersions('1.2.3-1', '1.2.3-alpha')).toBe(-1);
+    expect(compareVersions('1.2.3-alpha-1', '1.2.3-alpha-2')).toBe(-1);
+    expect(compareVersions('1.2.3-alpha.1', '1.2.3-alpha.1')).toBe(0);
   });
 
   it('should compare prerelease against lower release correctly', () => {

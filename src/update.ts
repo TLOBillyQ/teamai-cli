@@ -175,13 +175,14 @@ export async function fetchLatestVersion(
 
 /**
  * Compare two semver version strings.
- * Handles prerelease suffixes: a version with prerelease (e.g. 1.2.3-beta.1)
- * is always older than the same numeric version without one (semver §11).
+ * Handles prerelease suffixes according to semver precedence.
  * Returns: -1 if a < b, 0 if equal, 1 if a > b
  */
 export function compareVersions(a: string, b: string): number {
-  const [coreA, preA] = a.split('-', 2);
-  const [coreB, preB] = b.split('-', 2);
+  const [coreA, ...prePartsA] = a.split('-');
+  const [coreB, ...prePartsB] = b.split('-');
+  const preA = prePartsA.join('-');
+  const preB = prePartsB.join('-');
 
   const partsA = coreA.split('.').map(Number);
   const partsB = coreB.split('.').map(Number);
@@ -196,6 +197,22 @@ export function compareVersions(a: string, b: string): number {
   // Numeric cores are equal — prerelease is lower than release (semver §11)
   if (preA && !preB) return -1;
   if (!preA && preB) return 1;
+  if (preA && preB) {
+    const identifiersA = preA.split('.');
+    const identifiersB = preB.split('.');
+    for (let i = 0; i < Math.max(identifiersA.length, identifiersB.length); i++) {
+      const idA = identifiersA[i];
+      const idB = identifiersB[i];
+      if (idA === undefined) return -1;
+      if (idB === undefined) return 1;
+      if (idA === idB) continue;
+      const numericA = /^\d+$/.test(idA);
+      const numericB = /^\d+$/.test(idB);
+      if (numericA && numericB) return BigInt(idA) < BigInt(idB) ? -1 : 1;
+      if (numericA !== numericB) return numericA ? -1 : 1;
+      return idA < idB ? -1 : 1;
+    }
+  }
   return 0;
 }
 
