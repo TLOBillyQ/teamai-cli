@@ -1349,7 +1349,7 @@ teamai session save --push --include-prompt  # 额外带上（脱敏后的）首
 | Hook 事件 | 操作 |
 |-----------|------|
 | `SessionStart` | 先为当前 Agent 创建项目根目录（project scope），再自动 pull + 上报会话启动 |
-| `PostToolUse` | skill 追踪 + 知识贡献检测 + dashboard 上报 |
+| `PostToolUse` | 宿主提供已验证的技能事件时追踪 skill；检测知识贡献并上报 dashboard |
 | `UserPromptSubmit` | slash 命令追踪 |
 | `Stop` | CLI 更新检查 + 上报会话结束 |
 
@@ -1360,6 +1360,8 @@ teamai hooks remove    # 移除
 ```
 
 inject 和 remove 只会操作你实际已安装的工具（即 `~/.<tool>/` 根目录已存在的工具）。对于 `toolPaths` 中已配置但未安装的工具，命令不会为其凭空创建根目录。
+
+> **Codex 事件限制（2026 年 9 月在 CLI 0.156.1 和桌面版观察）** — 读取 `SKILL.md` 产生的是 `Bash` 工具事件；直接引用 `$skill` 没有产生 `PostToolUse` 事件。非交互 CLI 没有可用的计划工具，一次交互式 `/plan` 只读探针也仅产生 `Bash`；这些 CLI 探针无法触发计划创建或更新。桌面版 hook 日志同样记录到工具调用的 `Bash`，未验证到 `Skill` 或 `TodoWrite` 事件；该环境也无法探测计划创建或更新。这些探针不能代表所有 Codex 版本或计划流程。TeamAI 只安装 Codex 的通配 `PostToolUse` hook：可观察的工具调用仅记录一次，但无法据此提供这些不可观察操作的技能使用记录、技能 webhook 或 TodoWrite 提醒。`teamai doctor` 只检查安装配置，不证明 matcher 实际触发。升级后运行 `teamai hooks inject` 以移除旧 matcher。
 
 > **Windows** — hook 命令写成 `"<node.exe>" "<…>\dist\index.js" hook-dispatch …`，而非 POSIX 上的 `bash -lc "teamai hook-dispatch …"`。经由 npm 的 `teamai.cmd` shim 解析 `teamai` 会让每次 hook 多起一个 `bash` 和一个 `cmd.exe`，而 Windows 为控制台程序创建的窗口会在桌面上闪出黑窗。直接指定 node 与入口脚本可把这条链压到一个进程。Codex 通过 PowerShell 运行 hook（`pwsh -Command "<命令>"`），PowerShell 会把命令当作**脚本**解析，而以引号开头的脚本会直接报 `ParserError`（退出码 1），因此 Codex 是唯一带 PowerShell 调用运算符的工具：`& "<node.exe>" "<…>\dist\index.js" hook-dispatch …`。升级后请重新执行 `teamai hooks inject` 以改写已有条目。
 

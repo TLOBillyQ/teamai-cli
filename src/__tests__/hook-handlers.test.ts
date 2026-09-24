@@ -966,6 +966,18 @@ describe('post-tool-use dispatch — local-agent runs detached, never blocks hos
     // dashboard-report parses the event and appends locally — it must stay inline.
     expect(mockParseHookEvent).toHaveBeenCalled();
   });
+
+  it('records one observable Codex Bash read without inferring a skill use or hint', async () => {
+    const { appendUsageEvent } = await import('../usage-tracker.js');
+    const dispatcher = createDispatcher({ handlers: buildHandlerRegistry() });
+    const result = await dispatcher.dispatch('post-tool-use', '*', {
+      tool_name: 'Bash', tool_input: { command: 'cat .agents/skills/implement/SKILL.md' }, cwd: '/tmp/proj',
+    }, 'codex', 'foreground');
+    expect(mockParseHookEvent).toHaveBeenCalledOnce();
+    expect(appendUsageEvent).not.toHaveBeenCalled();
+    expect(mockSendWebhook).not.toHaveBeenCalled();
+    expect(result.output).toBeNull();
+  });
 });
 
 describe('dashboard-report team correction keywords', () => {

@@ -454,7 +454,11 @@ export function builtinHookDefs(tool: string): HookDef[] {
         : getDispatchCommand;
   const specs = tool === 'copilot'
     ? [...BUILTIN_HOOK_SPECS, COPILOT_SESSION_END_SPEC]
-    : BUILTIN_HOOK_SPECS;
+    : tool === 'codex'
+      // Codex CLI and desktop expose no verified Skill/TodoWrite PostToolUse
+      // event. Their wildcard hook still records observable tool calls.
+      ? BUILTIN_HOOK_SPECS.filter((spec) => spec.matcher !== 'Skill' && spec.matcher !== 'TodoWrite')
+      : BUILTIN_HOOK_SPECS;
   return specs.map((spec) => ({
     source: 'builtin' as const,
     key: spec.key,

@@ -171,6 +171,7 @@ describe('hooksList', () => {
         }
         const text = out.join('\n');
         expect(text).toContain('Built-in hooks (A)');
+        expect(text).toContain('Codex: Skill and TodoWrite matchers are omitted');
         expect(text).toContain('hook-dispatch');
         expect(text).toContain('Team hooks (B)');
         expect(text).toContain('[lint] Stop');

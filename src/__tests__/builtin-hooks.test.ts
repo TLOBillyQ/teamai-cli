@@ -30,6 +30,14 @@ describe('builtinHookDefs — unified built-in hook model', () => {
     expect(builtinHookDefs('claude')).toHaveLength(6);
   });
 
+  it('keeps only observed Codex events while other hosts retain their specialized hooks', () => {
+    expect(builtinHookDefs('codex').map((def) => [def.event, def.matcher])).toEqual([
+      ['SessionStart', '*'], ['Stop', '*'], ['PostToolUse', '*'], ['UserPromptSubmit', '*'],
+    ]);
+    expect(builtinHookDefs('claude').some((def) => def.matcher === 'Skill')).toBe(true);
+    expect(builtinHookDefs('claude').some((def) => def.matcher === 'TodoWrite')).toBe(true);
+  });
+
   it('Claude defs carry no timeout; Cursor defs carry per-hook timeouts', () => {
     expect(builtinHookDefs('claude').every((d) => d.timeout === undefined)).toBe(true);
     const cursor = builtinHookDefs('cursor');

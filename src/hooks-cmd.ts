@@ -116,11 +116,12 @@ export async function hooksList(_options: GlobalOptions): Promise<void> {
     const teamDefs = await parseTeamHooks(localConfig.repo.localPath);
 
     console.log('');
-    console.log('Built-in hooks (A) — teamai operational (injected into every tool):');
+    console.log('Built-in hooks (A) — Claude-compatible baseline (host support varies):');
     for (const d of builtinHookDefs('claude')) {
         const matcher = d.matcher && d.matcher !== '*' ? ` [${d.matcher}]` : '';
         console.log(`  ${d.event}${matcher}  →  ${d.command}`);
     }
+    console.log('  Codex: Skill and TodoWrite matchers are omitted (no verified tool events).');
 
     console.log('');
     console.log(`Team hooks (B) — hooks/hooks.yaml (${teamDefs.length}):`);

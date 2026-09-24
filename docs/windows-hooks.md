@@ -41,9 +41,11 @@ file:
 "command": "bash -lc \"teamai hook-dispatch session-start --tool claude 2>/dev/null\" || true"
 ```
 
-There are six hooks per tool: `SessionStart`, `Stop`, `PostToolUse` (three
-matchers: `*`, `Skill`, `TodoWrite`), and `UserPromptSubmit`. They let the team
-repo record session stats and apply shared rules/skills across agents.
+The Claude-compatible baseline has six hooks: `SessionStart`, `Stop`,
+`PostToolUse` (matchers `*`, `Skill`, `TodoWrite`), and `UserPromptSubmit`.
+Host support varies: Codex installs only the wildcard `PostToolUse` matcher,
+because its `Skill` and `TodoWrite` tool events have not been verified.
+See the Codex event limits in the usage guide.
 
 ---
 
@@ -115,7 +117,7 @@ path (adjust if Git is installed elsewhere):
 Apply this to every agent that has hooks:
 
 - `~/.claude/settings.json` — 6 hooks
-- `~/.codex/hooks.json` — 6 hooks
+- `~/.codex/hooks.json` — 4 hooks (one wildcard `PostToolUse` matcher)
 - `~/.zcode/cli/config.json` — `command` field → Git Bash path; 6 hooks
 - `~/.codebuddy/settings.json` — create if missing; 6 hooks
 - `~/.qoder/settings.json` — create if missing; 6 hooks

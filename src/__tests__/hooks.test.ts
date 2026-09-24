@@ -106,7 +106,8 @@ describe('hooks', () => {
       const result = mockFiles['/test/codex-hooks.json'] as { hooks: Record<string, Array<{ matcher?: string; description?: string; hooks: Array<{ command: string }> }>> };
       expect(result.hooks).toBeDefined();
       expect(Object.keys(result.hooks)).toEqual(['SessionStart', 'Stop', 'PostToolUse', 'UserPromptSubmit']);
-      expect(result.hooks.PostToolUse).toHaveLength(3);
+      expect(result.hooks.PostToolUse).toHaveLength(1);
+      expect(result.hooks.PostToolUse[0].matcher).toBeUndefined();
       expect(result.hooks.SessionStart[0].hooks[0].command).toContain('--tool codex');
       expect(result.hooks.SessionStart[0].description).toBeUndefined();
     });
@@ -149,6 +150,23 @@ describe('hooks', () => {
       expect(result.hooks['stop']).toHaveLength(1);
       expect(result.hooks['postToolUse']).toHaveLength(3);
       expect(result.hooks['beforeSubmitPrompt']).toHaveLength(1);
+    });
+
+    it('re-injecting Codex removes obsolete matchers without duplicating the wildcard', async () => {
+      const path = '/test/codex-hooks.json';
+      mockFiles[path] = {
+        hooks: { PostToolUse: [
+          { hooks: [{ type: 'command', command: 'teamai hook-dispatch post-tool-use --tool codex' }] },
+          { matcher: 'Skill', hooks: [{ type: 'command', command: 'teamai hook-dispatch post-tool-use --tool codex --matcher Skill' }] },
+          { matcher: 'TodoWrite', hooks: [{ type: 'command', command: 'teamai hook-dispatch post-tool-use --tool codex --matcher TodoWrite' }] },
+          { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo custom' }] },
+        ] },
+      };
+      await injectHooks(path, 'codex');
+      await injectHooks(path, 'codex');
+      const result = mockFiles[path] as { hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ command: string }> }>> };
+      expect(result.hooks.PostToolUse.map((entry) => entry.matcher)).toEqual(['Bash', undefined]);
+      expect(result.hooks.PostToolUse.filter((entry) => entry.hooks[0].command.includes('teamai'))).toHaveLength(1);
     });
 
     it('updates command when content changes (Claude)', async () => {

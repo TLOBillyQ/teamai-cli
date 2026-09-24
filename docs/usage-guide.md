@@ -1390,7 +1390,7 @@ Hooks automatically injected by `teamai init`:
 | Hook Event | Action |
 |-----------|------|
 | `SessionStart` | Seed the current agent's project root (project scope), then auto pull + report session start |
-| `PostToolUse` | Skill tracking + knowledge contribution detection + dashboard reporting |
+| `PostToolUse` | Skill tracking where the host exposes a verified skill event; knowledge contribution detection + dashboard reporting |
 | `UserPromptSubmit` | Slash command tracking |
 | `Stop` | CLI update check + report session end |
 
@@ -1401,6 +1401,8 @@ teamai hooks remove    # Remove
 ```
 
 The inject and remove commands only touch tools you actually have installed (i.e. whose `~/.<tool>/` root directory already exists). They never create root directories for tools listed in `toolPaths` but not installed.
+
+> **Codex event limits (observed on CLI 0.156.1 and the desktop app, September 2026)** — Reading `SKILL.md` produced `Bash` tool events; a direct `$skill` reference produced no `PostToolUse` event. A non-interactive CLI run had no plan tool, and one interactive `/plan` read-only probe produced only `Bash`. Plan creation and update could not be triggered in those CLI probes. The desktop hook log likewise shows `Bash` for tool calls, without a verified `Skill` or `TodoWrite` event; plan creation and update were not available to probe there. These probes do not establish behavior for every Codex version or plan workflow. TeamAI installs only the Codex wildcard `PostToolUse` hook: it records observable tool calls once, but does not claim skill-use records, skill webhooks, or TodoWrite reminders from these unobservable actions. `teamai doctor` checks the installed configuration, not whether a matcher fired. Re-run `teamai hooks inject` after upgrading to remove the old matchers.
 
 > **Windows** — hook commands are written as `"<node.exe>" "<…>\dist\index.js" hook-dispatch …` instead of the POSIX `bash -lc "teamai hook-dispatch …"`. Resolving `teamai` through npm's `teamai.cmd` shim starts a `bash` and a `cmd.exe` process per hook, and every console process Windows has to create can flash a black window on the desktop. Naming node and the entry script directly cuts the chain to one process. Codex runs its hooks through PowerShell (`pwsh -Command "<command>"`), which parses the command as a *script* and refuses one whose first token is a quoted string (`ParserError`, exit 1), so Codex is the one tool whose command carries the PowerShell call operator: `& "<node.exe>" "<…>\dist\index.js" hook-dispatch …`. Re-run `teamai hooks inject` after upgrading to rewrite existing entries.
 

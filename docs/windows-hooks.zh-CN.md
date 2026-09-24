@@ -36,9 +36,10 @@ WorkBuddy 使用其自带的 PortableGit `sh.exe`，**CodeBuddy 使用 cmd.exe**
 "command": "bash -lc \"teamai hook-dispatch session-start --tool claude 2>/dev/null\" || true"
 ```
 
-每个工具包含六个钩子：`SessionStart`、`Stop`、`PostToolUse`（三个匹配器：
-`*`、`Skill`、`TodoWrite`）以及 `UserPromptSubmit`。它们让团队仓库能够记录会话
-统计信息，并在各代理间应用共享的规则 / 技能。
+Claude 兼容的基线包含六个钩子：`SessionStart`、`Stop`、`PostToolUse`
+（匹配器为 `*`、`Skill`、`TodoWrite`）以及 `UserPromptSubmit`。各宿主支持情况不同：
+Codex 只安装通配 `PostToolUse` 匹配器，因为尚未验证其 `Skill` 和 `TodoWrite`
+工具事件。详见使用指南中的 Codex 事件限制。
 
 ---
 
@@ -108,7 +109,7 @@ export function hasShell(): boolean {
 此修改适用于所有带钩子的代理：
 
 - `~/.claude/settings.json` — 6 个钩子
-- `~/.codex/hooks.json` — 6 个钩子
+- `~/.codex/hooks.json` — 4 个钩子（`PostToolUse` 仅有通配匹配器）
 - `~/.zcode/cli/config.json` — `command` 字段 → Git Bash 路径；6 个钩子
 - `~/.codebuddy/settings.json` — 若不存在则创建；6 个钩子
 - `~/.qoder/settings.json` — 若不存在则创建；6 个钩子
