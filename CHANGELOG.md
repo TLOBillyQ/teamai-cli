@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.25.1-gitea.0](http://lzxsvn:3000/agent/teamai-cli/compare/v0.25.0...gitea-v0.25.1-gitea.0) (2026-09-24)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Fix Codex hooks: install only the verified wildcard `PostToolUse` matcher; re-injection removes obsolete `Skill` and `TodoWrite` matchers while preserving custom hooks. Skill-use records, skill webhooks, and plan hints remain unavailable for Codex actions without observable events ([eggy/teamai-netease#52](http://lzxsvn:3000/eggy/teamai-netease/issues/52)).
+- Add first-class Gitea and Kimi Code CLI support, improve provider onboarding errors, and make team configuration and resource scans deterministic.
+- Deliver shared rules through `AGENTS.md`, preserve shared resources during uninstall, and report ambiguous or leftover skills without deleting user content.
+- Harden Windows hook execution and authenticated Git subprocesses; allow independent role knowledge and skill edits.
+- After upgrading, run `teamai hooks inject` and complete Codex's hook trust step if prompted. Use `teamai doctor --json` to check the installed configuration.
+
 ## [0.24.5](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.24.4...gitea-v0.24.5) (2026-09-22)
 
 ### Gitea build (`@agent/teamai-cli`)
