@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.26.0](http://lzxsvn:3000/agent/teamai-cli/compare/gitea-v0.25.2...gitea-v0.26.0) (2026-09-30)
+
+### Gitea build (`@agent/teamai-cli`)
+
+- Rebased onto upstream `main` (0.26.0 plus 7 later fixes; released as 0.26.0); the upstream 0.26.0 notes are under [Unreleased] below.
+- Fork changes: Gitea provider and onboarding failure reporting, Kimi Code CLI target, `toolPaths` merged over defaults, rules inline instructions, Gitea registry publish.
+
 ## [Unreleased]
 
 ### 💥 Breaking Changes
