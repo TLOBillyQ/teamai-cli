@@ -296,7 +296,7 @@ built-in and enterprise plugins support both OpenCode 1.18.23 (`server`) and V2
 
 - Re-run the failing command with `-v` / `--verbose` for detail.
 - `teamai status` shows exactly how local differs from the team repo.
-- Report unexpected behavior at https://github.com/Tencent/teamai-cli/issues
+- Report unexpected behavior at https://github.com/TLOBillyQ/teamai-cli/issues
   with the agent name, platform, and the step that failed.
 
 ## "Pull left an instruction file unchanged"

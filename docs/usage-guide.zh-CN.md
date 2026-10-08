@@ -2708,7 +2708,8 @@ teamai 会往几类由你自己维护的文件（各工具的指令文件、shel
 
 | 标记（起 / 止） | 写入位置 | 写入时机 | 常量（`src/types.ts`） |
 | --- | --- | --- | --- |
-| `<!-- [teamai:team-rules:start] -->` / `<!-- [teamai:team-rules:end] -->` | Kimi `.kimi-code/AGENTS.md`；ZCode 用户 `~/.zcode/AGENTS.md`；Codex 用户 `~/.codex/AGENTS.md`；DSH 用户 `$DSH_HOME/AGENTS.md`；已安装 ZCode/DSH 的项目 `AGENTS.md`；Hermes 用户 `$HERMES_HOME/SOUL.md`。Codex 项目规则走 session hooks | `pull` 内联团队规则正文，不按路径限定；没有规则时移除区块 | `TEAMAI_TEAM_RULES_START` / `TEAMAI_TEAM_RULES_END` |
+| `<!-- [teamai:team-rules:start] -->` / `<!-- [teamai:team-rules:end] -->` | Kimi `.kimi-code/AGENTS.md`；ZCode 用户 `~/.zcode/AGENTS.md`；Codex 用户 `~/.codex/AGENTS.md`；DSH 用户 `$DSH_HOME/AGENTS.md`；已安装 ZCode/DSH 的项目 `AGENTS.md`。Codex 项目规则走 session hooks | `pull` 内联团队规则正文，不按路径限定；没有规则时移除区块 | `TEAMAI_TEAM_RULES_START` / `TEAMAI_TEAM_RULES_END` |
+| `<!-- [teamai:rules:start] -->` / `<!-- [teamai:rules:end] -->` | Hermes `$HERMES_HOME/SOUL.md` 与旧版内联规则文件 | Hermes 内联规则与早期受管区块迁移 | `TEAMAI_RULES_START` / `TEAMAI_RULES_END` |
 | `<!-- [teamai:culture:start] -->` / `<!-- [teamai:culture:end] -->` | 各工具的指令文件 | `pull` 时，团队仓存在 `culture.md`（见[团队文化](#团队文化)） | `TEAMAI_CULTURE_START` / `TEAMAI_CULTURE_END` |
 | `<!-- [teamai:claudemd:start] -->` / `<!-- [teamai:claudemd:end] -->` | 各工具的指令文件 | `pull` 时，团队仓 `claudemd/` 下有属于你当前 namespace 的共享指令 | `TEAMAI_CLAUDEMD_START` / `TEAMAI_CLAUDEMD_END` |
 | `<!-- [teamai:recall-rules:start] -->` / `<!-- [teamai:recall-rules:end] -->` | 同时支持子代理的工具的指令文件：`claude`、`claude-internal`、`tclaude`、`codebuddy`、`kimi`、`zcode`、`codex`（`zcode` 与 `codex` 仅 user scope：项目根目录 `AGENTS.md` 与没有 recall 子代理的工具共用） | recall 开启时由 `pull` 与 `teamai recall enable` 写入（默认关闭，可通过 `sharing.recall.enabled` 或 `teamai recall enable` 开启），`teamai recall disable` 移除；内容是让主对话调用 `teamai-recall` 子代理的说明 | `TEAMAI_RECALL_RULES_START` / `TEAMAI_RECALL_RULES_END` |
@@ -2971,7 +2972,7 @@ teamai remove rules <name>
 
 ---
 
-> **仓库**：https://github.com/Tencent/teamai-cli
-> **问题反馈**：https://github.com/Tencent/teamai-cli/issues
+> **仓库**：https://github.com/TLOBillyQ/teamai-cli
+> **问题反馈**：https://github.com/TLOBillyQ/teamai-cli/issues
 
 仪表盘支持切换已安装的项目范围和用户范围，同一项目的 worktree 归为一个项目。全部工作区显示全部本机会话及启动时知识库范围。健康报告已整合进团队上下文和团队改进。新安装范围后重启仪表盘以发现新范围。

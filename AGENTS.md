@@ -7,8 +7,10 @@ TypeScript, Node 20+ (`npm run lint` needs ^20.19 or >=22.12), tsup (ESM), Vites
 ## Git
 
 - Default branch: `main`. Worktrees and PRs based on `origin/main`.
-- PR only to `Tencent/teamai-cli`. Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
+- Primary fork: GitHub `TLOBillyQ/teamai-cli` (`origin`), an official fork of `Tencent/teamai-cli` (`upstream`). Issues and PRs target the GitHub fork. Gitea `agent/teamai-cli` (`gitea`) is the code mirror and `@agent/teamai-cli` publishing registry. Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
 - **必须使用 Worktree**：改代码前先 `EnterWorktree`，禁止在主工作目录修改。
+- **本 fork 的提交历史**：qinyuanj / 覃远杰 的改动保持为精简的主题提交，手动 rebase 在用户指定的上游基线之上（滚动更新为 `upstream/main`，release 重建为核实过的正式 tag）。更新上游、改写历史、同步 Gitea 镜像或发布 fork 前，读取 `docs/agents/fork-maintenance.md`，按其中的 `backup/*` 备份、fixup、验证和 push lease 步骤执行。
+- **本 fork 的发布**（`@agent/teamai-cli`，Gitea registry）：正好基于上游 release 构建时沿用其版本号（如 `0.24.0`）；两次上游 release 之间的 Gitea 版本用下一个 patch 加 `-gitea.N`（如 `0.24.1-gitea.0`）。发布提交打 annotated tag `gitea-v<version>`，不用 `v*`，避免和上游 tag 撞名。发布前确认 tag 所指提交的 `npm run build` 产物与要发布的包一致。
 
 ## Rules
 
@@ -73,3 +75,17 @@ shared state, list every reader and every writer.
   `[P2 non-blocking]` for suggestions that do not block merge, and `[P3 nit]`
   for minor or optional polish, theoretical edge cases, and coverage deferred
   to CI. (In Chinese, `[P1 阻断]` / `[P2 非阻断]` / `[P3 可选]`.)
+
+## Agent skills
+
+### Issue tracker
+
+For issue and PR operations on GitHub `TLOBillyQ/teamai-cli`, use `gh` with an explicit repo target. Read `docs/agents/issue-tracker.md` before creating, fetching, triaging, or closing tickets.
+
+### Triage labels
+
+Default vocabulary: `bug` / `enhancement` (categories) plus `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

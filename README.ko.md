@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/v/teamai-cli.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/dm/teamai-cli.svg" alt="npm downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -72,27 +72,39 @@ Skills, Rules, MCP 등 Agent가 사용할 수 있는 리소스는 모두 공유�
 
 ### 설치
 
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli)는 Tencent/teamai-cli의 주요 공식 fork입니다. issue와 PR은 GitHub에 제출하세요. Gitea `agent/teamai-cli`는 코드 미러와 Gitea provider를 포함하는 `@agent/teamai-cli`의 배포 registry로 유지됩니다.
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm install -g @agent/teamai-cli
 ```
+
+registry는 익명으로 읽을 수 있으므로 설치에 token이 필요하지 않습니다. 전역 설치는 프로젝트의 `.npmrc`를 읽지 않으므로 `npm config set`이 필요합니다.
+
+상위 프로젝트 버전은 공개 npm에서 `npm install -g teamai-cli`로 설치할 수 있지만 Gitea provider는 포함하지 않습니다.
 
 ### 팀 관리자 / 개인 사용자
 
-Git 호스트(GitHub, GitLab, GitCode, CNB, TGit 또는 비공개 Git 서비스)에 공유 경험 저장소를 만들고, **팀원에게 쓰기 권한을 부여한 뒤** `teamai init https://github.com/your-org/your-repo`를 실행하세요.
+Git 호스트(GitHub, GitLab, GitCode, CNB, TGit, Gitea 또는 비공개 Git 서비스)에 공유 경험 저장소를 만들고, **팀원에게 쓰기 권한을 부여한 뒤** `teamai init http://lzxsvn:3000/agent/yourrepo`를 실행하세요.
+
+> **Gitea:** `teamai init` 전에 `GITEA_TOKEN`(Gitea access token)을 설정하세요. 관리자의 첫 init에는 `GITEA_URL`(예: `http://lzxsvn:3000`)도 설정해야 새 `teamai.yaml`에 `provider: gitea`가 기록됩니다. 이후 팀원은 `GITEA_URL`을 생략할 수 있습니다. init은 저장소에 선언된 provider를 읽고 저장소 URL에서 Gitea 주소를 가져옵니다. token이 없거나 유효하지 않으면 init은 오류로 종료하며, Git의 `user.name`으로 팀원을 등록하지 않습니다.
 
 > **아직 팀 저장소가 없나요?** 프로덕션에 바로 쓸 수 있는 Skills, Rules, review agents가 미리 들어 있는 템플릿으로 시작하세요. [teamai-hub](https://github.com/teamai-hub) org를 둘러본 뒤 **Fork**하고, 새로 만든 저장소에 `teamai init`을 실행하면 됩니다.
 
 ### 팀원
 
 ```bash
-# Choose one, depending on where you want resources installed
+# Gitea access token (Gitea → 설정 → 애플리케이션 → 토큰 생성)
+export GITEA_TOKEN=<your-gitea-token>
 
-# Project-scope init (default, resources installed under the project directory)
+# 리소스 설치 위치에 따라 둘 중 하나를 선택
+
+# 프로젝트 범위 초기화 (기본값, 프로젝트 디렉터리에 설치)
 cd /path/to/my-project
-teamai init https://github.com/your-org/your-repo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
-# Or, user-scope init (resources installed under ~/)
-teamai init https://github.com/your-org/your-repo --scope user
+# 또는 사용자 범위 초기화 (~/ 아래에 설치)
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 초기화가 끝나면 관리자가 배포한 최신 Skills / Rules 및 기타 Harness 업데이트가 매 AI 세션에서 자동으로 반영됩니다. 수동 동기화는 필요 없습니다.
@@ -139,6 +151,7 @@ Git을 기반으로 세 층의 역량을 구축합니다:
     <tr><td>ZCode</td><td align="center">✓</td><td align="center">✓*</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
     <tr><td>Oh My Pi</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
     <tr><td>JoyCode</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
+    <tr><td>Kimi Code CLI</td><td align="center">✓</td><td align="center">✓*</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
   </tbody>
 </table>
 

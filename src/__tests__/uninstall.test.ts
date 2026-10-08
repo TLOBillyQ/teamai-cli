@@ -946,7 +946,8 @@ describe('uninstall', () => {
     expect(after).not.toContain('# Team Rule');
   });
 
-  describe.each(['zcode', 'dsh'] as const)('project-root AGENTS.md shared by %s and WorkBuddy', (inlineTool) => {
+  describe.each(['zcode', 'dsh'] as const)('project-root AGENTS.md shared by %s and another inline reader', (inlineTool) => {
+    const otherTool = inlineTool === 'zcode' ? 'dsh' : 'zcode';
     const sharedAgentsMd = [
       '# Project notes',
       '',
@@ -958,9 +959,9 @@ describe('uninstall', () => {
       'shared instructions',
       TEAMAI_CLAUDEMD_END,
       '',
-      TEAMAI_RULES_START,
+      TEAMAI_TEAM_RULES_START,
       '# Team Rule',
-      TEAMAI_RULES_END,
+      TEAMAI_TEAM_RULES_END,
       '',
     ].join('\n');
 
@@ -969,27 +970,28 @@ describe('uninstall', () => {
       const repoPath = path.join(projectRoot, '.teamai', 'team-repo');
       await fse.ensureDir(repoPath);
       await fse.ensureDir(path.join(projectRoot, `.${inlineTool}`, 'skills'));
-      await fse.ensureDir(path.join(projectRoot, '.workbuddy', 'rules'));
+      await fse.ensureDir(path.join(projectRoot, `.${otherTool}`, 'skills'));
       await fse.writeFile(path.join(projectRoot, 'AGENTS.md'), sharedAgentsMd);
       vi.stubEnv('HOME', path.join(tmpDir, 'home'));
       vi.stubEnv('SHELL', '/bin/bash');
 
       const teamConfig = makeTeamConfig({
-        toolPaths: { [inlineTool]: DEFAULT_TOOL_PATHS[inlineTool], workbuddy: DEFAULT_TOOL_PATHS.workbuddy },
+        toolPaths: { [inlineTool]: DEFAULT_TOOL_PATHS[inlineTool], [otherTool]: DEFAULT_TOOL_PATHS[otherTool] },
       });
       const localConfig = makeLocalConfig(projectRoot, repoPath, { scope: 'project', projectRoot });
       mockAutoDetectInit.mockResolvedValue({ localConfig, teamConfig });
       return path.join(projectRoot, 'AGENTS.md');
     }
 
-    it('targeted uninstall strips only the rules block while WorkBuddy still uses the file', async () => {
+    it('targeted uninstall keeps every managed block needed by the other inline reader', async () => {
       const agentsMd = await setupSharedProject();
 
       await uninstall({ force: true, agent: inlineTool });
 
       const after = await fse.readFile(agentsMd, 'utf-8');
       expect(after).toContain('# Project notes');
-      expect(after).not.toContain(TEAMAI_RULES_START);
+      expect(after).toContain(TEAMAI_TEAM_RULES_START);
+      expect(after).toContain('# Team Rule');
       expect(after).toContain(TEAMAI_CULTURE_START);
       expect(after).toContain(TEAMAI_CLAUDEMD_START);
     });

@@ -84,13 +84,21 @@ afterEach(async () => {
   await fse.remove(tmpDir);
 });
 
-describe('ZCode and DeepSeek Harness get the project\'s rules from their session-start hook (#946)', () => {
-  it.each(['zcode', 'dsh'])('%s: adds the project rules once at session start, a path-scoped rule after its globs', async (tool) => {
-    const text = await sessionStart(tool, config('project'));
-
+describe('ZCode and DeepSeek Harness inline project rules without duplicate hook context', () => {
+  it.each(['zcode', 'dsh'])('%s: writes rule bodies once into the native project instructions', async (tool) => {
+    await fse.ensureDir(path.join(projectRoot, `.${tool}`));
+    await fse.ensureDir(path.join(homeDir, `.${tool}`));
+    const parsed = TeamaiConfigSchema.parse({ team: 'test', repo: 'r' });
+    const teamConfig = { ...parsed, toolPaths: { [tool]: parsed.toolPaths[tool] } };
+    const local = config('project', [tool]);
+    const handler = new RulesHandler();
+    await handler.pullAllRules(teamConfig, local);
+    await handler.pullAllRules(teamConfig, local);
+    const text = await fse.readFile(path.join(projectRoot, 'AGENTS.md'), 'utf8');
     expect(count(text, 'PROJ-RULE-7')).toBe(1);
-    expect(text).toContain('Applies to files matching: src/**\nPrefer named exports.');
+    expect(text).toContain('Prefer named exports.');
     expect(text).not.toContain('paths:');
+    expect(await sessionStart(tool, local)).toBeNull();
   });
 
   it.each(['zcode', 'dsh'])('%s: adds nothing in a session outside a project, whose rules are in its own AGENTS.md', async (tool) => {
@@ -105,13 +113,9 @@ describe('ZCode and DeepSeek Harness get the project\'s rules from their session
     expect(await sessionStart(tool, config('project', ['claude']))).toBeNull();
   });
 
-  it.each(['zcode', 'dsh'])('%s: adds the rules only, not the instruction blocks, which #945 gives it no channel for', async (tool) => {
+  it.each(['zcode', 'dsh'])('%s: leaves instruction and rule context to the native file', async (tool) => {
     await fse.outputFile(path.join(repoPath, 'culture.md'), '---\ncompany:\n  name: Acme\n---\n\nBe kind to teammates.\n');
-
-    const text = await sessionStart(tool, config('project'));
-
-    expect(text).toContain('PROJ-RULE-7');
-    expect(text).not.toContain('Be kind to teammates.');
+    expect(await sessionStart(tool, config('project'))).toBeNull();
   });
 });
 
@@ -157,8 +161,8 @@ describe('OMP and Hermes get no rules through their extension or plugin (#946)',
 describe('with teamai in both scopes, each rule reaches the tool once (#946)', () => {
   /** The file each tool reads its user rules from, and the home dir that says it is installed. */
   const TOOLS = [
-    { tool: 'zcode', root: '.zcode', file: '.zcode/AGENTS.md', project: (cfg: LocalConfig) => sessionStart('zcode', cfg) },
-    { tool: 'dsh', root: '.dsh', file: '.dsh/AGENTS.md', project: (cfg: LocalConfig) => sessionStart('dsh', cfg) },
+    { tool: 'zcode', root: '.zcode', file: '.zcode/AGENTS.md', project: async () => fse.readFile(path.join(projectRoot, 'AGENTS.md'), 'utf8') },
+    { tool: 'dsh', root: '.dsh', file: '.dsh/AGENTS.md', project: async () => fse.readFile(path.join(projectRoot, 'AGENTS.md'), 'utf8') },
     { tool: 'pi', root: '.pi/agent', file: '.pi/agent/AGENTS.md', project: piInstructions },
   ];
   const teamConfig = () => TeamaiConfigSchema.parse({ team: 'test', repo: 'https://example.invalid/x/team.git' });

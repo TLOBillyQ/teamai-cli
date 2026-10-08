@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/v/teamai-cli.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/dm/teamai-cli.svg" alt="npm downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -78,7 +78,7 @@ Skills、Rules、MCP 等 Agent 能用的资源都可以分享：
 
 ### 安装
 
-本分支增加了 Gitea provider，发布在内部 Gitea registry，不在公共 npm 上。
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) 是 Tencent/teamai-cli 的主要官方 fork，issue 和 PR 提交到 GitHub。Gitea `agent/teamai-cli` 保留为代码镜像及 `@agent/teamai-cli` 的发布 registry，该包包含 Gitea provider。
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
@@ -91,7 +91,7 @@ npm install -g @agent/teamai-cli
 
 ### 团队管理员 / 个人使用者
 
-在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init https://github.com/your-org/your-repo`。
+在 Git 托管平台（GitHub、GitLab、GitCode、CNB、TGit、Gitea，或私有 Git 服务）创建共享经验仓库，**授予团队成员写权限**，然后运行 `teamai init http://lzxsvn:3000/agent/yourrepo`。
 
 > **Gitea：**`teamai init` 前先设置 `GITEA_TOKEN`（Gitea access token）。管理员首次 init 还需设置 `GITEA_URL`（如 `http://lzxsvn:3000`），新生成的 `teamai.yaml` 才会记下 `provider: gitea`。此后成员可以不设 `GITEA_URL`：init 会读取仓库声明的 provider，并从仓库 URL 取 Gitea 实例地址。token 缺失或无效时 init 直接报错退出，不会用 Git `user.name` 注册成员。
 
@@ -107,10 +107,10 @@ export GITEA_TOKEN=<your-gitea-token>
 
 # 项目级初始化（默认，资源安装到项目目录下）
 cd /path/to/my-project
-teamai init https://github.com/your-org/your-repo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
 # 或者，用户级初始化（资源安装到 ~/ 下）
-teamai init https://github.com/your-org/your-repo --scope user
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 初始化完成后，每次开启 AI 会话时都会自动拉取管理员发布的 skills / rules 等 Harness 更新，无需手动同步。
@@ -157,6 +157,7 @@ teamai init https://github.com/your-org/your-repo --scope user
     <tr><td>ZCode</td><td align="center">✓</td><td align="center">✓*</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td></tr>
     <tr><td>Oh My Pi</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
     <tr><td>JoyCode</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
+    <tr><td>Kimi Code CLI</td><td align="center">✓</td><td align="center">✓*</td><td align="center">✓</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">✓</td><td align="center">✓</td><td align="center">✓</td><td align="center">—</td><td align="center">—</td><td align="center">—</td></tr>
   </tbody>
 </table>
 
