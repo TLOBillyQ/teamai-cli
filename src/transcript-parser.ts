@@ -2,14 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { TEAMAI_RECALL_OUTPUT_START, TEAMAI_RECALL_OUTPUT_END } from './types.js';
 
 /**
  * The fixed start/end sentinels teamai's recall output prints (see recall.ts
  * `formatResults`). Used by `extractRecalledDocIds` to delimit a recall region
  * when parsing doc-ids.
  */
-const RECALL_REGION_START = '--- [teamai:recall:start] ---';
-const RECALL_REGION_END = '--- [teamai:recall:end] ---';
+const RECALL_REGION_START = TEAMAI_RECALL_OUTPUT_START;
+const RECALL_REGION_END = TEAMAI_RECALL_OUTPUT_END;
 
 export interface TranscriptVoteData {
   recalledDocIds: string[];
