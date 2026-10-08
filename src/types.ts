@@ -1173,6 +1173,12 @@ export const TEAMAI_CLAUDEMD_END = '<!-- [teamai:claudemd:end] -->';
 export const TEAMAI_RECALL_RULES_START = '<!-- [teamai:recall-rules:start] -->';
 export const TEAMAI_RECALL_RULES_END = '<!-- [teamai:recall-rules:end] -->';
 
+// Delimiters of `teamai recall` stdout. Never written to a file — not to be
+// confused with the recall-rules block above. The transcript parser reads them
+// back to credit recalled docs. Documented in docs/usage-guide*.md.
+export const TEAMAI_RECALL_OUTPUT_START = '--- [teamai:recall:start] ---';
+export const TEAMAI_RECALL_OUTPUT_END = '--- [teamai:recall:end] ---';
+
 // ─── Usage tracking ────────────────────────────────────
 
 /** Regex for valid skill names: alphanumeric, hyphens, underscores, colons, dots. Max 200 chars. */
