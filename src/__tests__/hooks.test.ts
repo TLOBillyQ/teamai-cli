@@ -45,6 +45,11 @@ function extractCommands(hooks: Record<string, unknown[]>): string[] {
   return cmds;
 }
 
+function decodeDispatchCommand(command: string): string {
+  return command.replace(/\[Convert\]::FromBase64String\('([^']+)'\)/g,
+    (_, encoded: string) => Buffer.from(encoded, 'base64').toString('utf8'));
+}
+
 function extractTeamaiSubcommands(hooks: Record<string, unknown[]>): string[] {
   const cmds = extractCommands(hooks);
   const subcmds = new Set<string>();
@@ -106,7 +111,7 @@ describe('hooks', () => {
       expect(result.hooks).toBeDefined();
       expect(Object.keys(result.hooks)).toEqual(['SessionStart', 'Stop', 'PostToolUse', 'UserPromptSubmit']);
       expect(result.hooks.PostToolUse).toHaveLength(3);
-      expect(result.hooks.SessionStart[0].hooks[0].command).toContain('--tool codex');
+      expect(decodeDispatchCommand(result.hooks.SessionStart[0].hooks[0].command)).toContain('--tool codex');
       expect(result.hooks.SessionStart[0].description).toBeUndefined();
     });
 
@@ -348,7 +353,7 @@ describe('hooks', () => {
     it('codex hooks contain --tool codex', async () => {
       await injectHooks('/test/hooks.json', 'codex');
       const result = mockFiles['/test/hooks.json'] as { hooks: Record<string, unknown[]> };
-      const cmds = extractCommands(result.hooks);
+      const cmds = extractCommands(result.hooks).map(decodeDispatchCommand);
       const toolCmds = cmds.filter((c) => c.includes('--tool'));
       expect(toolCmds.length).toBeGreaterThan(0);
       for (const cmd of toolCmds) {
