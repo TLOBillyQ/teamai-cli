@@ -130,8 +130,18 @@ step — do not assume auto-sync just works.
 Codex gates non-managed hooks behind an explicit **trust** step. `teamai init` /
 `teamai hooks inject` may write the hooks, but Codex won't run them until the user
 trusts them (`teamai doctor` prints a reminder when it detects this). Guide the
-user to trust the teamai hooks in Codex, then reopen a session. Until then, run
+user to review/trust the teamai hooks in `/hooks` or Settings → Hooks, including
+changed hooks that need trust again, then reopen a session. Until then, run
 `teamai pull` manually.
+
+On Windows, after upgrading, run `teamai hooks inject` to update **all six**
+built-in entries in `~/.codex/hooks.json`, then guide the user through trusting
+them again. Codex alone uses `powershell.exe -NoProfile -NonInteractive -Command`
+to invoke the absolute Git Bash path. Operators stay inside the quoted payload,
+so the outer cmd.exe, PowerShell, or Git Bash needs no outer shell operators.
+Check that `powershell.exe` is on the hook process's `PATH` and Git Bash is
+installed; without a resolved Git Bash path, the launcher falls back to bare
+`bash` and may select WSL. Other tools keep their existing commands.
 
 ### Cursor
 

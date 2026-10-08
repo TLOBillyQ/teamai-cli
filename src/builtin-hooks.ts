@@ -277,6 +277,13 @@ function getHookShellCommand(): string {
 export function getDispatchCommand(event: string, tool: string, matcher?: string, binPath?: string): string {
   const bin = binPath ?? 'teamai';
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
+  if (process.platform === 'win32' && tool === 'codex') {
+    // Codex inherits its host shell. A bare executable with one quoted payload
+    // parses in PowerShell, cmd.exe and Git Bash; all operators stay inside it.
+    const shell = getHookShellCommand().replace(/^"|"$/g, '').replace(/'/g, "''");
+    const dispatch = `${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null || true`.replace(/'/g, "''");
+    return `powershell.exe -NoProfile -NonInteractive -Command "& '${shell}' -lc '${dispatch}'; exit 0"`;
+  }
   return `${getHookShellCommand()} -lc "${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
 }
 
