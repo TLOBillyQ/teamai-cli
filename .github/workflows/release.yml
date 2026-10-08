@@ -7,6 +7,9 @@ on:
 
 jobs:
   publish-npm:
+    # Public npm releases belong to the upstream repository. This fork publishes
+    # @agent/teamai-cli to Gitea manually; see docs/agents/fork-maintenance.md.
+    if: github.repository == 'Tencent/teamai-cli'
     name: Publish to public npm
     runs-on: ubuntu-latest
     permissions:

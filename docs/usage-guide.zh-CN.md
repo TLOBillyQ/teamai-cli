@@ -2466,7 +2466,7 @@ teamai remove rules <name>
 
 ---
 
-> **仓库**：https://github.com/Tencent/teamai-cli
-> **问题反馈**：https://github.com/Tencent/teamai-cli/issues
+> **仓库**：https://github.com/TLOBillyQ/teamai-cli
+> **问题反馈**：https://github.com/TLOBillyQ/teamai-cli/issues
 
 仪表盘支持切换已安装的项目范围和用户范围，同一项目的 worktree 归为一个项目。全部工作区显示全部本机会话及启动时知识库范围。健康报告已整合进团队上下文和团队改进。新安装范围后重启仪表盘以发现新范围。

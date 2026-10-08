@@ -5,7 +5,7 @@ Thanks for your interest in improving TeamAI! This document explains how to get 
 ## Development Setup
 
 ```bash
-git clone https://github.com/Tencent/teamai-cli.git
+git clone https://github.com/TLOBillyQ/teamai-cli.git
 cd teamai-cli
 npm install
 ```
@@ -80,7 +80,7 @@ See [docs/providers.md](../docs/providers.md) for how to add a new git provider.
 2. Write tests for your change (we target 80%+ coverage).
 3. Run `npx vitest run`, `npx tsc --noEmit` and `npm run lint` — all must pass.
 4. Use conventional commits where possible: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
-5. Open a PR with a clear description: what's the problem, what's the fix, anything reviewers should pay attention to.
+5. Open a PR against `TLOBillyQ/teamai-cli` on GitHub, with base `main` and a clear description: what's the problem, what's the fix, anything reviewers should pay attention to. Gitea `agent/teamai-cli` remains the code mirror and `@agent/teamai-cli` publishing registry.
 
 Your PR also gets an informational `Code Erosion` report (SlopCodeBench verbosity/erosion metrics) posted as a comment — it never blocks the merge and is just there to flag creeping complexity. See [docs/ci-code-erosion.md](../docs/ci-code-erosion.md).
 
@@ -99,7 +99,7 @@ Your PR also gets an informational `Code Erosion` report (SlopCodeBench verbosit
 
 ## Bug Reports & Feature Requests
 
-Please file issues at [github.com/Tencent/teamai-cli/issues](https://github.com/Tencent/teamai-cli/issues). Include:
+Please file issues at [github.com/TLOBillyQ/teamai-cli/issues](https://github.com/TLOBillyQ/teamai-cli/issues). Include:
 
 - What you tried to do
 - What happened (error output, stack trace)

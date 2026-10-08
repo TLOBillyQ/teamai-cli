@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/v/teamai-cli.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/dm/teamai-cli.svg" alt="npm downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -72,7 +72,7 @@ Once a teammate is set up, they just open their agent and already have the team'
 
 ### Install
 
-This fork adds the Gitea provider and is published to the internal Gitea registry, not to public npm.
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) is the primary official fork of Tencent/teamai-cli; file issues and PRs on GitHub. Gitea `agent/teamai-cli` remains the code mirror and publishing registry for `@agent/teamai-cli`, which includes the Gitea provider.
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
@@ -85,7 +85,7 @@ Upstream releases are on public npm as `npm install -g teamai-cli`, but they do 
 
 ### Team admin / solo user
 
-Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init https://github.com/your-org/your-repo`.
+Create a shared-experience repo on your git host (GitHub, GitLab, GitCode, CNB, TGit, Gitea, or a private Git service), **grant write access to team members**, then run `teamai init http://lzxsvn:3000/agent/yourrepo`.
 
 > **Gitea:** set `GITEA_TOKEN` (a Gitea access token) before `teamai init`. The admin's first init also needs `GITEA_URL` (for example, `http://lzxsvn:3000`) so the new `teamai.yaml` records `provider: gitea`. After that, members can leave `GITEA_URL` unset: init reads the declared provider and takes the Gitea instance from the repo URL. Without a working token, init exits with an error instead of registering you under your Git `user.name`.
 
@@ -101,10 +101,10 @@ export GITEA_TOKEN=<your-gitea-token>
 
 # Project-scope init (default, resources installed under the project directory)
 cd /path/to/my-project
-teamai init https://github.com/your-org/your-repo
+teamai init http://lzxsvn:3000/agent/yourrepo
 
 # Or, user-scope init (resources installed under ~/)
-teamai init https://github.com/your-org/your-repo --scope user
+teamai init http://lzxsvn:3000/agent/yourrepo --scope user
 ```
 
 Once initialized, every AI session automatically pulls the latest skills / rules and other Harness updates published by admins — no manual sync needed.

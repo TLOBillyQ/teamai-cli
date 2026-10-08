@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/v/teamai-cli.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/dm/teamai-cli.svg" alt="npm downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -72,9 +72,16 @@ Skills, Rules, MCP 등 Agent가 사용할 수 있는 리소스는 모두 공유�
 
 ### 설치
 
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli)는 Tencent/teamai-cli의 주요 공식 fork입니다. issue와 PR은 GitHub에 제출하세요. Gitea `agent/teamai-cli`는 코드 미러와 Gitea provider를 포함하는 `@agent/teamai-cli`의 배포 registry로 유지됩니다.
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm install -g @agent/teamai-cli
 ```
+
+registry는 익명으로 읽을 수 있으므로 설치에 token이 필요하지 않습니다. 전역 설치는 프로젝트의 `.npmrc`를 읽지 않으므로 `npm config set`이 필요합니다.
+
+상위 프로젝트 버전은 공개 npm에서 `npm install -g teamai-cli`로 설치할 수 있지만 Gitea provider는 포함하지 않습니다.
 
 ### 팀 관리자 / 개인 사용자
 

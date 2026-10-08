@@ -107,6 +107,8 @@ import {
   checkForUpdate,
   doUpdate,
   update,
+  resolveRegistryForPackage,
+  registryInstallArg,
   resolveNpmCommand,
   prefixFromEntryPath,
 } from '../update.js';
@@ -185,6 +187,42 @@ beforeEach(() => {
 });
 
 // ─── Unit tests: compareVersions ────────────────────────
+
+describe('resolveRegistryForPackage', () => {
+  it('routes each scope to its own registry', () => {
+    expect(resolveRegistryForPackage('teamai-cli')).toBe('https://registry.npmjs.org');
+    expect(resolveRegistryForPackage('@tencent/teamai-cli')).toBe('http://r.tnpm.oa.com');
+    expect(resolveRegistryForPackage('@agent/teamai-cli'))
+      .toBe('http://lzxsvn:3000/api/packages/agent/npm/');
+  });
+
+  it('lets TEAMAI_NPM_REGISTRY override every scope', () => {
+    process.env.TEAMAI_NPM_REGISTRY = 'http://mirror.internal/npm/';
+    try {
+      expect(resolveRegistryForPackage('@agent/teamai-cli')).toBe('http://mirror.internal/npm/');
+    } finally {
+      delete process.env.TEAMAI_NPM_REGISTRY;
+    }
+  });
+});
+
+describe('registryInstallArg', () => {
+  it('scopes the Gitea registry to @agent so dependencies resolve from the default registry', () => {
+    expect(registryInstallArg('@agent/teamai-cli'))
+      .toBe('--@agent:registry=http://lzxsvn:3000/api/packages/agent/npm/');
+    expect(registryInstallArg('@tencent/teamai-cli')).toBe('--registry=http://r.tnpm.oa.com');
+    expect(registryInstallArg('teamai-cli')).toBe('--registry=https://registry.npmjs.org');
+  });
+
+  it('passes TEAMAI_NPM_REGISTRY as a global --registry', () => {
+    process.env.TEAMAI_NPM_REGISTRY = 'http://mirror.internal/npm/';
+    try {
+      expect(registryInstallArg('@agent/teamai-cli')).toBe('--registry=http://mirror.internal/npm/');
+    } finally {
+      delete process.env.TEAMAI_NPM_REGISTRY;
+    }
+  });
+});
 
 describe('compareVersions', () => {
   it('should return 0 for equal versions', () => {
@@ -379,7 +417,7 @@ describe('doUpdate', () => {
     }
     expect(mockedExecSync).toHaveBeenCalledWith(
       expect.any(String),
-      expect.arrayContaining(['install', '-g']),
+      expect.arrayContaining(['install', '-g', registryInstallArg(getCurrentPackageName())]),
       expect.any(Object),
     );
     expect(mockedLog.success).toHaveBeenCalledWith(
@@ -873,6 +911,8 @@ describe('resolveNpmCommand', () => {
 });
 
 describe('prefixFromEntryPath', () => {
+  // The sanity check looks for the *running* package (scoped on this fork).
+  const pkgDir = path.join(...getCurrentPackageName().split('/'));
   let existsSpy: MockInstance<typeof fs.existsSync>;
 
   beforeEach(() => {
@@ -883,22 +923,22 @@ describe('prefixFromEntryPath', () => {
   });
 
   it('strips the POSIX lib/ nesting and hands npm the prefix it expects', () => {
-    const entry = path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, true)).toEqual({ prefix: path.join('/usr', 'local'), global: true });
     // The sanity check must look under <prefix>/lib/node_modules/<pkg>.
     expect(existsSpy).toHaveBeenCalledWith(
-      path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli'),
+      path.join('/usr', 'local', 'lib', 'node_modules', pkgDir),
     );
   });
 
   it('returns the slice before node_modules on Windows layouts', () => {
-    const entry = path.join('C:', 'tools', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('C:', 'tools', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, false)).toEqual({ prefix: path.join('C:', 'tools'), global: true });
-    expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', 'teamai-cli'));
+    expect(existsSpy).toHaveBeenCalledWith(path.join('C:', 'tools', 'node_modules', pkgDir));
   });
 
   it('detects the flat vendored layout on POSIX (no lib component)', () => {
@@ -906,36 +946,36 @@ describe('prefixFromEntryPath', () => {
     // nesting npm -g would create. The sanity check must verify the layout
     // that was actually matched — not <prefix>/lib/node_modules/<pkg>, which
     // does not exist here.
-    const entry = path.join('/home', 'u', '.teamai', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/home', 'u', '.teamai', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, true)).toEqual({ prefix: path.join('/home', 'u', '.teamai'), global: false });
     expect(existsSpy).toHaveBeenCalledWith(
-      path.join('/home', 'u', '.teamai', 'node_modules', 'teamai-cli'),
+      path.join('/home', 'u', '.teamai', 'node_modules', pkgDir),
     );
   });
 
   it('keeps non-lib roots on POSIX (project-local installs)', () => {
-    const entry = path.join('/home', 'u', 'proj', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/home', 'u', 'proj', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(true);
 
     expect(prefixFromEntryPath(entry, true)).toEqual({ prefix: path.join('/home', 'u', 'proj'), global: false });
-    expect(existsSpy).toHaveBeenCalledWith(path.join('/home', 'u', 'proj', 'node_modules', 'teamai-cli'));
+    expect(existsSpy).toHaveBeenCalledWith(path.join('/home', 'u', 'proj', 'node_modules', pkgDir));
   });
 
   it('returns null for paths outside an npm-managed layout', () => {
     existsSpy.mockReturnValue(true);
 
-    expect(prefixFromEntryPath('/home/u/dev/teamai-cli/dist/index.js', true)).toBeNull();
+    expect(prefixFromEntryPath(path.join('/home', 'u', 'dev', pkgDir, 'dist', 'index.js'), true)).toBeNull();
   });
 
   it('returns null when the package dir is not under the derived prefix', () => {
-    const entry = path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli', 'dist', 'index.js');
+    const entry = path.join('/usr', 'local', 'lib', 'node_modules', pkgDir, 'dist', 'index.js');
     existsSpy.mockReturnValue(false);
 
     expect(prefixFromEntryPath(entry, true)).toBeNull();
     expect(existsSpy).toHaveBeenCalledWith(
-      path.join('/usr', 'local', 'lib', 'node_modules', 'teamai-cli'),
+      path.join('/usr', 'local', 'lib', 'node_modules', pkgDir),
     );
   });
 });

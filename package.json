@@ -1,5 +1,5 @@
 {
-  "name": "teamai-cli",
+  "name": "@agent/teamai-cli",
   "version": "0.26.0",
   "description": "TeamAI — Make Every Team AI Native (skill sync + shared knowledge base, powered by Git)",
   "type": "module",
@@ -18,7 +18,8 @@
     "LICENSE"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "http://lzxsvn:3000/api/packages/agent/npm/"
   },
   "scripts": {
     "build": "tsup",
@@ -34,11 +35,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Tencent/teamai-cli.git"
+    "url": "git+https://github.com/TLOBillyQ/teamai-cli.git"
   },
-  "homepage": "https://github.com/Tencent/teamai-cli#readme",
+  "homepage": "https://github.com/TLOBillyQ/teamai-cli#readme",
   "bugs": {
-    "url": "https://github.com/Tencent/teamai-cli/issues"
+    "url": "https://github.com/TLOBillyQ/teamai-cli/issues"
   },
   "keywords": [
     "ai",

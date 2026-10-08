@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/Tencent/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml"><img src="https://github.com/TLOBillyQ/teamai-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/v/teamai-cli.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/teamai-cli"><img src="https://img.shields.io/npm/dm/teamai-cli.svg" alt="npm downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -72,9 +72,16 @@ Skills, Rules, MCP และทรัพยากรอื่นที่ Agent 
 
 ### ติดตั้ง
 
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) เป็น fork อย่างเป็นทางการหลักของ Tencent/teamai-cli ให้ส่ง issue และ PR บน GitHub ส่วน Gitea `agent/teamai-cli` ยังคงเป็นมิเรอร์โค้ดและ registry สำหรับเผยแพร่ `@agent/teamai-cli` ซึ่งมี Gitea provider
+
 ```bash
-npm install -g teamai-cli
+npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
+npm install -g @agent/teamai-cli
 ```
+
+อ่าน registry ได้แบบไม่ระบุตัวตน จึงไม่ต้องใช้ token เพื่อติดตั้ง ต้องใช้ `npm config set` เพราะการติดตั้งแบบ global ไม่อ่าน `.npmrc` ของโปรเจกต์
+
+รุ่น upstream อยู่บน npm สาธารณะ ติดตั้งด้วย `npm install -g teamai-cli` แต่ไม่มี Gitea provider
 
 ### ผู้ดูแลทีม / ผู้ใช้คนเดียว
 
