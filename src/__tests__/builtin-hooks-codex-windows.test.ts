@@ -30,6 +30,10 @@ describe('Windows Codex hook execution', () => {
       PostToolUse: [old('post-tool-use'), old('post-tool-use', 'Skill'), old('post-tool-use', 'TodoWrite')],
       UserPromptSubmit: [old('prompt-submit')],
     } }));
+    const bash = path.join(root, 'Git', 'bin', 'bash.exe');
+    fs.mkdirSync(path.dirname(bash), { recursive: true });
+    fs.writeFileSync(bash, '');
+    vi.stubEnv('ProgramFiles', root);
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     await reconcileHooks(hooksPath, 'codex', []);
     const first = fs.readFileSync(hooksPath, 'utf8');
@@ -45,7 +49,7 @@ describe('Windows Codex hook execution', () => {
     expect(JSON.parse(fs.readFileSync(hooksPath, 'utf8')).hooks.SessionStart).toEqual([user]);
   });
   it.skipIf(!canExecute)('dispatches through PowerShell with a spaced Bash path and fails open', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai codex '));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai $codex '));
     dirs.push(root);
     const bash = path.join(root, 'Git', 'bin', 'bash.exe');
     fs.mkdirSync(path.dirname(bash), { recursive: true });
@@ -56,7 +60,7 @@ describe('Windows Codex hook execution', () => {
     fs.writeFileSync(probe, '#!/bin/bash\ncat\nprintf "%s\\n" "$@"\necho hidden >&2\nexit 7\n', { mode: 0o755 });
     const command = getDispatchCommand('stop', 'codex', 'Skill', `'${probe}'`);
     vi.restoreAllMocks();
-    // Use the local PowerShell executable to run the generated payload.
+    // The POSIX probe uses pwsh because Windows PowerShell is unavailable here.
     expect(command).toMatch(/^powershell\.exe -NoProfile -NonInteractive -Command /);
     const payload = command.slice(command.indexOf('-Command ') + 9);
     const expected = 'stdin payloadhook-dispatch\nstop\n--tool\ncodex\n--matcher\nSkill\n';

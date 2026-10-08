@@ -137,8 +137,13 @@ changed hooks that need trust again, then reopen a session. Until then, run
 On Windows, after upgrading, run `teamai hooks inject` to update **all six**
 built-in entries in `~/.codex/hooks.json`, then guide the user through trusting
 them again. Codex alone uses `powershell.exe -NoProfile -NonInteractive -Command`
-to invoke the absolute Git Bash path. Operators stay inside the quoted payload,
-so the outer cmd.exe, PowerShell, or Git Bash needs no outer shell operators.
+to invoke Git Bash. The dynamic shell path and full dispatch string are UTF-8
+Base64-encoded, then decoded inside Windows PowerShell with
+`[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'))`. This prevents
+outer shells from expanding path characters such as `$`. Operators stay inside
+the quoted payload, so outer cmd.exe, PowerShell, or Git Bash needs no outer
+shell operators. Preserve the trailing `# teamai hook-dispatch` marker used to
+identify managed commands for reconciliation and removal.
 Check that `powershell.exe` is on the hook process's `PATH` and Git Bash is
 installed; without a resolved Git Bash path, the launcher falls back to bare
 `bash` and may select WSL. Other tools keep their existing commands.

@@ -39,15 +39,20 @@ in `~/.codex/hooks.json`: `SessionStart`, `Stop`, `PostToolUse` (`*`, `Skill`,
 `TodoWrite`), and `UserPromptSubmit`. Then review and **trust the changed hooks
 again** in Codex `/hooks` or Settings → Hooks, and open a fresh session.
 
-Only Windows Codex uses this command shape (example Git Bash location):
+Only Windows Codex uses this command shape (simplified: `<shell-base64>` and
+`<dispatch-base64>` stand for generated UTF-8 Base64 strings, not literal values):
 
 ```json
-"command": "powershell.exe -NoProfile -NonInteractive -Command \"& 'C:/Program Files/Git/bin/bash.exe' -lc 'teamai hook-dispatch session-start --tool codex 2>/dev/null || true'; exit 0\""
+"command": "powershell.exe -NoProfile -NonInteractive -Command \"& ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('<shell-base64>'))) -lc ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('<dispatch-base64>'))); exit 0 # teamai hook-dispatch\""
 ```
 
-Windows PowerShell invokes the absolute Git Bash path. All operators stay inside
-the quoted `-Command` payload, so the outer cmd.exe, PowerShell, or Git Bash sees
-an executable and arguments without outer shell operators. This requires
+The Git Bash path and full dispatch string (including `2>/dev/null || true`)
+are encoded before injection and decoded inside Windows PowerShell. This keeps
+path characters such as `$` from being expanded by the outer shell. All
+operators stay inside the quoted `-Command` payload, so outer cmd.exe,
+PowerShell, or Git Bash sees an executable and arguments without outer shell
+operators. The trailing `# teamai hook-dispatch` marker identifies the managed
+command for reconciliation and removal. This requires
 `powershell.exe` on the hook process's `PATH` and Git Bash installed; without a
 resolved Git Bash path, the launcher falls back to bare `bash`, which may select
 WSL. Other tools keep their existing commands.

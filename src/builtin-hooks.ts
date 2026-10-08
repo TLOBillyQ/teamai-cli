@@ -277,14 +277,16 @@ function getHookShellCommand(): string {
 export function getDispatchCommand(event: string, tool: string, matcher?: string, binPath?: string): string {
   const bin = binPath ?? 'teamai';
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
+  const dispatch = `${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null`;
   if (process.platform === 'win32' && tool === 'codex') {
-    // Codex inherits its host shell. A bare executable with one quoted payload
-    // parses in PowerShell, cmd.exe and Git Bash; all operators stay inside it.
-    const shell = getHookShellCommand().replace(/^"|"$/g, '').replace(/'/g, "''");
-    const dispatch = `${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null || true`.replace(/'/g, "''");
-    return `powershell.exe -NoProfile -NonInteractive -Command "& '${shell}' -lc '${dispatch}'; exit 0"`;
+    // Codex inherits its host shell. Encode dynamic strings so PowerShell,
+    // cmd.exe and Git Bash cannot expand path characters before invocation.
+    const decode = (value: string) => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value).toString('base64')}'))`;
+    const shell = decode(getHookShellCommand().replace(/^"|"$/g, ''));
+    // Keep the managed-command marker visible for reconciliation and removal.
+    return `powershell.exe -NoProfile -NonInteractive -Command "& (${shell}) -lc (${decode(`${dispatch} || true`)}); exit 0 # teamai hook-dispatch"`;
   }
-  return `${getHookShellCommand()} -lc "${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
+  return `${getHookShellCommand()} -lc "${dispatch}" || true`;
 }
 
 /**

@@ -1648,7 +1648,7 @@ inject 和 remove 只会操作你实际已安装的工具（即 `~/.<tool>/` 根
 
 在 Windows 上，经由 bash 执行的内置 hook 派发命令（如 Claude、Codex、Cursor、Copilot CLI）会以绝对路径引用 Git Bash——先查标准安装位置，再回退到 `HKLM\SOFTWARE\GitForWindows` 注册表——从而避免解析到 WSL 的 `bash.exe`；若找不到 Git Bash，则退回裸 `bash`。
 
-仅 Windows Codex 的派发命令以 `powershell.exe -NoProfile -NonInteractive -Command` 启动，在单个带引号的参数内部调用 Git Bash。所有运算符都留在该参数内，外层 cmd.exe、PowerShell 或 Git Bash 只需处理可执行文件与参数，无需解析外层 shell 运算符。此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的 Git Bash。升级后运行 `teamai hooks inject`，更新 `~/.codex/hooks.json` 中全部六条内置钩子，再在 Codex 中重新信任变更后的钩子并打开新会话。其他工具保持原有命令。
+仅 Windows Codex 的派发命令以 `powershell.exe -NoProfile -NonInteractive -Command` 启动，在单个带引号的参数内部调用 Git Bash。动态的 Git Bash 路径与完整派发字符串先编码为 UTF-8 Base64，再在内层 Windows PowerShell 中通过 `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'))` 解码，避免路径中的 `$` 等字符被外层 shell 展开。末尾的 `# teamai hook-dispatch` 标记用于识别受管命令，以便重新注入时协调及移除。所有运算符都留在该参数内，外层 cmd.exe、PowerShell 或 Git Bash 只需处理可执行文件与参数，无需解析外层 shell 运算符。此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的 Git Bash。升级后运行 `teamai hooks inject`，更新 `~/.codex/hooks.json` 中全部六条内置钩子，再在 Codex 中重新信任变更后的钩子并打开新会话。其他工具保持原有命令。
 
 > **Codex 信任门槛** — Codex（OpenAI / ChatGPT Codex 应用，工具 id 为 `codex`）对非托管 hooks 设有显式的用户信任机制。teamai 写入 `~/.codex/hooks.json` 后，对于新增或变更的 hook，Codex 可能会跳过执行，直到你在 `/hooks` 或 Settings → Hooks 中 review/trust。当检测到 Codex hooks 已安装时，`teamai hooks inject` 与 `teamai doctor` 会输出提示；teamai 从不修改 Codex 的 `[hooks.state]` 来自动信任 —— 信任操作交由你手动完成。
 

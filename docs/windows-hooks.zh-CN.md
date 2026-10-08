@@ -35,15 +35,18 @@ WorkBuddy 使用其自带的 PortableGit `sh.exe`，**CodeBuddy 使用 cmd.exe**
 `UserPromptSubmit`。随后在 Codex `/hooks` 或 Settings → Hooks 中审核并**重新信任
 变更后的钩子**，再打开新会话。
 
-仅 Windows Codex 使用以下命令形式（以常见 Git Bash 安装位置为例）：
+仅 Windows Codex 使用以下命令形式（简化示例：`<shell-base64>` 与
+`<dispatch-base64>` 代表生成的 UTF-8 Base64 字符串，不是实际参数值）：
 
 ```json
-"command": "powershell.exe -NoProfile -NonInteractive -Command \"& 'C:/Program Files/Git/bin/bash.exe' -lc 'teamai hook-dispatch session-start --tool codex 2>/dev/null || true'; exit 0\""
+"command": "powershell.exe -NoProfile -NonInteractive -Command \"& ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('<shell-base64>'))) -lc ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('<dispatch-base64>'))); exit 0 # teamai hook-dispatch\""
 ```
 
-Windows PowerShell 调用 Git Bash 的绝对路径。所有运算符均位于带引号的 `-Command`
-参数内部，因此外层 cmd.exe、PowerShell 或 Git Bash 只需处理可执行文件与参数，无需
-解析外层 shell 运算符。此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的
+Git Bash 路径与完整派发字符串（含 `2>/dev/null || true`）在注入前编码，在内层
+Windows PowerShell 中解码，避免路径中的 `$` 等字符被外层 shell 展开。所有运算符
+均位于带引号的 `-Command` 参数内部，因此外层 cmd.exe、PowerShell 或 Git Bash
+只需处理可执行文件与参数，无需解析外层 shell 运算符。末尾的
+`# teamai hook-dispatch` 标记用于识别受管命令，以便重新注入时协调及移除。此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的
 Git Bash；若无法解析 Git Bash 路径，启动器会退回裸 `bash`，可能选中 WSL。
 其他工具保持原有命令。
 
