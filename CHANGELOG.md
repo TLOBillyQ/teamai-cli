@@ -2,9 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-## Fork changes on upstream 0.26.0 (unreleased)
+## 0.26.1 (2026-10-08)
 
-This local fork keeps the upstream version and has not been published.
+- Windows Codex hooks now use an explicit PowerShell launcher and encode dynamic arguments to preserve paths containing spaces and `$` across PowerShell, cmd.exe and Git Bash.
+- Re-running `teamai hooks inject` replaces all six legacy Codex commands while preserving user hooks and remaining idempotent and removable. Updated commands require normal Codex trust confirmation.
+- Published as `@agent/teamai-cli` to the Gitea package registry.
+
+## Fork changes included in 0.26.1 (upstream 0.26.0 baseline)
 
 - `toolPaths` in a team repo's `teamai.yaml` is now merged over the built-in table per tool and per field (including `userScope`) instead of replacing it. Tools the team omits keep their defaults and keep receiving skills, rules, agents, CLAUDE.md, MCP, and hooks. Tables pinned from older releases pick up newer defaults such as kimi's `agents` and `claudemd`. Teams that relied on omitting a tool or field to disable it must now set it to `false` (for example `kimi: false` or `claude: { rules: false }`); a null entry keeps the default (#14).
 - Team rules, skills, docs and shared-instruction namespaces are scanned in name order instead of filesystem `readdir` order, so the rules block inlined into `.kimi-code/AGENTS.md` (and Hermes `SOUL.md`) is identical on every machine, and when `teamai push` scans team skills, a skill name present in two namespaces resolves to the same one on every machine (for #15).
