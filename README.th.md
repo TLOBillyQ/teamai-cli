@@ -72,7 +72,7 @@ Skills, Rules, MCP และทรัพยากรอื่นที่ Agent 
 
 ### ติดตั้ง
 
-[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) เป็น fork อย่างเป็นทางการหลักของ Tencent/teamai-cli ให้ส่ง issue และ PR บน GitHub ส่วน Gitea `agent/teamai-cli` ยังคงเป็นมิเรอร์โค้ดและ registry สำหรับเผยแพร่ `@agent/teamai-cli` ซึ่งมี Gitea provider
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) เป็น fork อย่างเป็นทางการหลักของ Tencent/teamai-cli โดย Git remote, issue และ PR ใช้ GitHub ส่วน Gitea ยังคงเป็น registry สำหรับเผยแพร่ `@agent/teamai-cli` ซึ่งมี Gitea provider เท่านั้น
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/

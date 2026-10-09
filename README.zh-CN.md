@@ -78,7 +78,7 @@ Skills、Rules、MCP 等 Agent 能用的资源都可以分享：
 
 ### 安装
 
-[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) 是 Tencent/teamai-cli 的主要官方 fork，issue 和 PR 提交到 GitHub。Gitea `agent/teamai-cli` 保留为代码镜像及 `@agent/teamai-cli` 的发布 registry，该包包含 Gitea provider。
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) 是 Tencent/teamai-cli 的主要官方 fork，Git remote、issue 和 PR 均使用 GitHub。Gitea 仅保留为 `@agent/teamai-cli` 的发布 registry，该包包含 Gitea provider。
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/

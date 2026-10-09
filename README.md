@@ -72,7 +72,7 @@ Once a teammate is set up, they just open their agent and already have the team'
 
 ### Install
 
-[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) is the primary official fork of Tencent/teamai-cli; file issues and PRs on GitHub. Gitea `agent/teamai-cli` remains the code mirror and publishing registry for `@agent/teamai-cli`, which includes the Gitea provider.
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli) is the primary official fork of Tencent/teamai-cli; Git remotes, issues, and PRs use GitHub. Gitea remains only the publishing registry for `@agent/teamai-cli`, which includes the Gitea provider.
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/

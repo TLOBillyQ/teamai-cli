@@ -7,9 +7,9 @@ TypeScript, Node 20+ (`npm run lint` needs ^20.19 or >=22.12), tsup (ESM), Vites
 ## Git
 
 - Default branch: `main`. Worktrees and PRs based on `origin/main`.
-- Primary fork: GitHub `TLOBillyQ/teamai-cli` (`origin`), an official fork of `Tencent/teamai-cli` (`upstream`). Issues and PRs target the GitHub fork. Gitea `agent/teamai-cli` (`gitea`) is the code mirror and `@agent/teamai-cli` publishing registry. Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
+- Primary fork: GitHub `TLOBillyQ/teamai-cli` (`origin`), an official fork of `Tencent/teamai-cli` (`upstream`). Git remotes, issues, and PRs use GitHub. Gitea hosts the `@agent/teamai-cli` publishing registry only. Before push, check `git log origin/main..HEAD`; rebase or cherry-pick if unrelated commits appear.
 - **必须使用 Worktree**：改代码前先 `EnterWorktree`，禁止在主工作目录修改。
-- **本 fork 的提交历史**：qinyuanj / 覃远杰 的改动保持为精简的主题提交，手动 rebase 在用户指定的上游基线之上（滚动更新为 `upstream/main`，release 重建为核实过的正式 tag）。更新上游、改写历史、同步 Gitea 镜像或发布 fork 前，读取 `docs/agents/fork-maintenance.md`，按其中的 `backup/*` 备份、fixup、验证和 push lease 步骤执行。
+- **本 fork 的提交历史**：qinyuanj / 覃远杰 的改动保持为精简的主题提交，手动 rebase 在用户指定的上游基线之上（滚动更新为 `upstream/main`，release 重建为核实过的正式 tag）。更新上游、改写历史或发布 fork 前，读取 `docs/agents/fork-maintenance.md`，按其中的 `backup/*` 备份、fixup、验证和 push lease 步骤执行。
 - **本 fork 的发布**（`@agent/teamai-cli`，Gitea registry）：正好基于上游 release 构建时沿用其版本号（如 `0.24.0`）；两次上游 release 之间的 Gitea 版本用下一个 patch 加 `-gitea.N`（如 `0.24.1-gitea.0`）。发布提交打 annotated tag `gitea-v<version>`，不用 `v*`，避免和上游 tag 撞名。发布前确认 tag 所指提交的 `npm run build` 产物与要发布的包一致。
 
 ## Rules
