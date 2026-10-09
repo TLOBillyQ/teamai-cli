@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues, specs, triage comments, labels, and code PRs live on GitHub `TLOBillyQ/teamai-cli`, the primary official fork of `Tencent/teamai-cli`. Use `gh` with `--repo TLOBillyQ/teamai-cli` on every issue and PR command: GitHub fork detection can otherwise select upstream. Gitea `agent/teamai-cli` at `http://lzxsvn:3000` remains the code mirror and `@agent/teamai-cli` publishing registry.
+Issues, specs, triage comments, labels, and code PRs live on GitHub `TLOBillyQ/teamai-cli`, the primary official fork of `Tencent/teamai-cli`. Use `gh` with `--repo TLOBillyQ/teamai-cli` on every issue and PR command: GitHub fork detection can otherwise select upstream. Git remotes also use GitHub; Gitea remains only the `@agent/teamai-cli` publishing registry.
 
 ## Conventions
 

@@ -72,7 +72,7 @@ Skills, Rules, MCP 등 Agent가 사용할 수 있는 리소스는 모두 공유�
 
 ### 설치
 
-[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli)는 Tencent/teamai-cli의 주요 공식 fork입니다. issue와 PR은 GitHub에 제출하세요. Gitea `agent/teamai-cli`는 코드 미러와 Gitea provider를 포함하는 `@agent/teamai-cli`의 배포 registry로 유지됩니다.
+[TLOBillyQ/teamai-cli](https://github.com/TLOBillyQ/teamai-cli)는 Tencent/teamai-cli의 주요 공식 fork입니다. Git remote, issue, PR은 GitHub를 사용합니다. Gitea는 Gitea provider를 포함하는 `@agent/teamai-cli`의 배포 registry로만 유지됩니다.
 
 ```bash
 npm config set @agent:registry http://lzxsvn:3000/api/packages/agent/npm/
