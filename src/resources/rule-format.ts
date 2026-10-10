@@ -70,8 +70,7 @@ const RULE_FORMATS: Readonly<Record<string, RuleFormat>> = {
 
 /**
  * The tools with no rules format whose session-start hook adds a project's
- * team rules: the Codex family (#938), ZCode, whose CLI runs only user-level
- * hooks, and DeepSeek Harness through teamai's `--patch` (#946).
+ * team rules: the Codex family (#938).
  */
 const SESSION_HOOK_RULE_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
 

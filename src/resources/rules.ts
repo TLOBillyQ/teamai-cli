@@ -1,11 +1,9 @@
 import path from 'node:path';
 import { isToolInstalledForConfig, ResourceHandler, type PlacementRecords } from './base.js';
-import matter from 'gray-matter';
 import { mergeManagedBlock } from '../utils/claudemd.js';
 import type { ResourceItem, ResourceItemStatus, DeliveryTarget, TeamaiConfig, LocalConfig } from '../types.js';
 import { listFilesRecursive, pathExists, copyFile, ensureDir, remove, fileContentEqual, getFileMtime, listDirs, readFileSafe, writeFile, pruneEmptyDirs, fileHash } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
-import { getUserHome } from '../utils/home.js';
 import { warnOnce } from '../utils/warn-once.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END, TEAMAI_TEAM_RULES_START, TEAMAI_TEAM_RULES_END, resolveBaseDir, resolveToolBaseDir, resolveToolRootDir, isAgentExcluded, scopedToolPaths, SELF_KNOWLEDGE_SCAN_KEY, getUserConfigPath } from '../types.js';
 import { EXCLUDED_RULE_NAMES, isDeployedRecallRule, TEAMAI_CONTEXT_RULE_NAME } from '../builtin-rules.js';
@@ -898,7 +896,8 @@ export class RulesHandler extends ResourceHandler {
   ): Promise<void> {
     if (localConfig.scope !== 'project') return;
     const baseDir = resolveBaseDir(localConfig);
-    let bodies: string[] | null = null;
+    const block = await teamRulesBlock(rules);
+    const blockBody = block === null ? '' : block.slice(TEAMAI_TEAM_RULES_START.length, -TEAMAI_TEAM_RULES_END.length).trim();
 
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
       if (!inlinesRulesIntoInstructions(tool)) continue;
@@ -907,31 +906,14 @@ export class RulesHandler extends ResourceHandler {
       const { isInstructionToolInstalled } = await import('../instruction-targets.js');
       if (!await isInstructionToolInstalled(tool, toolPath, localConfig)) continue;
 
-      if (bodies === null) {
-        bodies = [];
-        for (const rule of rules) {
-          const raw = await readFileSafe(rule.sourcePath);
-          if (raw === null) continue;
-          // Team rules may carry tool-neutral frontmatter (`paths:` …) that means
-          // nothing inside a system prompt; keep only the markdown body. Marker
-          // lines inside a rule would corrupt the block boundary, so drop them.
-          const body = matter(raw).content
-            .split('\n')
-            .filter((line) => line.trim() !== TEAMAI_RULES_START && line.trim() !== TEAMAI_RULES_END)
-            .join('\n')
-            .trim();
-          if (body !== '') bodies.push(body);
-        }
-      }
-
-      const blockBody = bodies.length > 0
-        ? ['<!-- DO NOT EDIT: This section is auto-managed by teamai -->', '', ...bodies.flatMap((b) => [b, ''])].join('\n')
-        : '';
       const filePath = path.join(baseDir, toolPath.claudemd);
       try {
         const existing = (await readFileSafe(filePath)) ?? '';
         const cleaned = mergeManagedBlock(existing, TEAMAI_RULES_START, TEAMAI_RULES_END, '');
-        const merged = mergeManagedBlock(cleaned, TEAMAI_TEAM_RULES_START, TEAMAI_TEAM_RULES_END, blockBody);
+        const mergedBody = mergeManagedBlock(cleaned, TEAMAI_TEAM_RULES_START, TEAMAI_TEAM_RULES_END, blockBody);
+        const merged = block === null ? mergedBody : mergedBody.replace(
+          `${TEAMAI_TEAM_RULES_START}\n${blockBody}\n${TEAMAI_TEAM_RULES_END}`, block,
+        );
         if (merged === existing.trim()) continue;
         if (merged === '') {
           if (await pathExists(filePath)) await remove(filePath);
@@ -939,7 +921,7 @@ export class RulesHandler extends ResourceHandler {
           await ensureDir(path.dirname(filePath));
           await writeFile(filePath, merged + '\n');
         }
-        log.debug(`Inlined ${bodies.length} rule(s) into ${tool} instructions at ${filePath}`);
+        log.debug(`Inlined ${rules.length} rule(s) into ${tool} instructions at ${filePath}`);
       } catch (e) {
         log.warn(`Failed to inline rules into ${tool} instructions at ${filePath}: ${(e as Error).message}`);
       }
@@ -972,8 +954,8 @@ export class RulesHandler extends ResourceHandler {
    * the team rules go into a file only that tool reads (`userRulesFile`: the
    * Codex family's AGENTS.md, ZCode, DeepSeek Harness, the OpenClaw
    * workspace, Pi, JoyCode's rules.txt). A project pull writes none of them;
-   * there the session-start hook (the Codex family, ZCode, DeepSeek Harness)
-   * or Pi's extension adds the rules (#938, #946).
+   * there the Codex session-start hook or Pi's extension adds the rules,
+   * while Kimi, ZCode and DeepSeek Harness read project inline blocks.
    * Public so the "Already synced" pull can run it after a CLI upgrade.
    */
   async syncUserRulesFiles(
@@ -1535,8 +1517,7 @@ export async function teamRulesBlock(rules: ResourceItem[]): Promise<string | nu
 
 /**
  * The team rules a tool with no rules format gets from its session-start hook
- * or extension in a project (the Codex family, #938; ZCode, DeepSeek Harness
- * and Pi, #946): the rules this member receives there,
+ * or extension in a project (the Codex family and Pi): the rules this member receives there,
  * as pull resolves them, in the same render as Hermes' SOUL.md. Null when no
  * rule has a body. User-scope rules reach it through its own instructions
  * file instead.
@@ -1553,8 +1534,7 @@ export async function teamRulesContext(teamConfig: TeamaiConfig, localConfig: Lo
  * channel it gets them through, for init and doctor to print as notes rather
  * than failures (#946). Hermes reads its rules from the global SOUL.md and
  * OpenClaw from its workspace AGENTS.md, which only a user-scope pull writes;
- * ZCode and DeepSeek Harness lose their session-start hook's text when they
- * compact a session.
+ * Kimi, ZCode and DeepSeek Harness read persistent inline project rules.
  */
 export async function ruleChannelNotes(localConfig: LocalConfig): Promise<string[]> {
   const notes: string[] = [];
@@ -1580,22 +1560,6 @@ export async function ruleChannelNotes(localConfig: LocalConfig): Promise<string
         + 'user-scope pull writes (`teamai init --scope user`).',
       );
     }
-  }
-  // Their session-start hook carries a project's rules (#946); doctor checks
-  // that it is registered, but cannot see these limits.
-  if (!isAgentExcluded(localConfig, 'zcode') && await pathExists(path.join(getUserHome(), '.zcode'))) {
-    notes.push(
-      'ZCode gets the project\'s team rules from teamai\'s SessionStart hook, and drops that text when it compacts '
-      + 'a session: the rules come back in the next session.',
-    );
-  }
-  const { isDshInstalled, resolveDshPatchPath } = await import('../dsh-hooks.js');
-  if (!isAgentExcluded(localConfig, 'dsh') && await isDshInstalled()) {
-    notes.push(
-      'DeepSeek Harness gets the project\'s team rules from teamai\'s session-start hook only when dsh runs with '
-      + `\`--patch "${resolveDshPatchPath()}"\`. It runs that hook detached, so the first request can miss the rules, `
-      + 'and it drops them when it compacts a session: they come back in the next session.',
-    );
   }
   return notes;
 }

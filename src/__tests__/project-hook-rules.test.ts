@@ -13,7 +13,6 @@ import { RulesHandler, ruleChannelNotes } from '../resources/rules.js';
 import { buildChecks, resolveDoctorContext } from '../doctor.js';
 import { detectProjectConfig } from '../config.js';
 import { reconcileHooks } from '../hooks.js';
-import { reconcileDshHooks, resolveDshHookConfigPath, resolveDshPatchPath } from '../dsh-hooks.js';
 import { injectPiHooks } from '../pi-hooks.js';
 import { TeamaiConfigSchema } from '../types.js';
 import type { LocalConfig } from '../types.js';
@@ -210,88 +209,31 @@ describe('doctor checks the hook or extension that adds the project rules (#946)
   }
   const find = async (enabled: string[], name: string) => (await checks(enabled)).find((c) => c.name === name);
 
-  const ZCODE = 'Project rules reach zcode through its SessionStart hook';
-  const DSH = 'Project rules reach dsh through its session-start hook';
+  const ZCODE = 'Project rules are inlined in zcode instructions';
+  const DSH = 'Project rules are inlined in dsh instructions';
   const PI = 'pi adds the team instructions and rules to its prompt';
 
-  it('zcode: passes once teamai\'s SessionStart hook is in ~/.zcode/cli/config.json and hooks are on', async () => {
-    await reconcileHooks(zcodeConfig(), 'zcode');
-
-    expect(await (await find(['zcode'], ZCODE))!.check()).toBe(true);
-  });
-
-  it('zcode: is not held to the Codex hook limit, which ZCode has no field for', async () => {
-    await reconcileHooks(zcodeConfig(), 'zcode');
-
-    const names = (await checks(['zcode'])).map((c) => c.name);
-    expect(names).toContain(ZCODE);
-    expect(names.filter((name) => name.includes('whole through its session hooks'))).toEqual([]);
-  });
-
-  it('zcode: fails while ZCode\'s config-file hooks are off, naming the file and the switch', async () => {
-    await reconcileHooks(zcodeConfig(), 'zcode');
-    const cfg = await fse.readJson(zcodeConfig());
-    await fse.writeJson(zcodeConfig(), { ...cfg, hooks: { ...cfg.hooks, enabled: false } });
-
-    const failing = (await find(['zcode'], ZCODE))!;
+  it.each(['zcode', 'dsh', 'kimi'])('%s: checks the inline rules independently of hook config', async (tool) => {
+    const root = tool === 'kimi' ? '.kimi-code' : `.${tool}`;
+    await fse.ensureDir(path.join(homeDir, root));
+    await fse.ensureDir(path.join(projectRoot, root));
+    const name = `Project rules are inlined in ${tool} instructions`;
+    const failing = (await find([tool], name))!;
     expect(await failing.check()).toBe(false);
-    expect(failing.fix).toContain(zcodeConfig());
-    expect(failing.fix).toContain('hooks.enabled');
-    expect(failing.fix).toContain('teamai hooks inject');
-    expect(failing.fix).not.toContain('--force');
-  });
-
-  it('zcode: fails naming the parse error when ~/.zcode/cli/config.json is not JSON, not as a missing hook', async () => {
-    await fse.outputFile(zcodeConfig(), '{ "hooks": { "enabled": true, ');
-
-    const failing = (await find(['zcode'], ZCODE))!;
-    expect(await failing.check()).toBe(false);
-    expect(failing.fix).toContain(`${zcodeConfig()} is not valid JSON (`);
-    expect(failing.fix).not.toContain('has no teamai SessionStart hook');
-  });
-
-  it('zcode: fails when the SessionStart hook is missing', async () => {
-    await fse.outputJson(zcodeConfig(), { hooks: { enabled: true, events: {} } });
-
-    expect(await (await find(['zcode'], ZCODE))!.check()).toBe(false);
-  });
-
-  it('dsh: passes once the hook config and the patch are written', async () => {
-    await fse.ensureDir(path.join(homeDir, '.dsh'));
-    await reconcileDshHooks([], {});
-
-    const passing = (await find(['dsh'], DSH))!;
-    expect(await passing.check()).toBe(true);
-  });
-
-  it('dsh: is checked where $DSH_HOME says dsh lives, as pull finds it', async () => {
-    const dshHome = path.join(tmpDir, 'dsh-home');
-    await fse.ensureDir(dshHome);
-    vi.stubEnv('DSH_HOME', dshHome);
-
-    const failing = (await find(['dsh'], DSH))!;
-    expect(await failing.check()).toBe(false);
-    expect(failing.fix).toContain(resolveDshPatchPath());
-  });
-
-  it('dsh: names both files when both are missing', async () => {
-    await fse.ensureDir(path.join(homeDir, '.dsh'));
-
-    const failing = (await find(['dsh'], DSH))!;
-    expect(failing.fix).toContain(resolveDshPatchPath());
-    expect(failing.fix).toContain(resolveDshHookConfigPath());
-  });
-
-  it('dsh: fails when the patch is gone, naming it and the --patch flag', async () => {
-    await fse.ensureDir(path.join(homeDir, '.dsh'));
-    await reconcileDshHooks([], {});
-    await fse.remove(resolveDshPatchPath());
-
-    const failing = (await find(['dsh'], DSH))!;
-    expect(await failing.check()).toBe(false);
-    expect(failing.fix).toContain(resolveDshPatchPath());
-    expect(failing.fix).toContain('--patch');
-    expect(failing.fix).toContain('teamai hooks inject');
+    expect(failing.fix).toContain('teamai pull');
+    const cfg = TeamaiConfigSchema.parse({ team: 'test', repo: 'r' });
+    await new RulesHandler().pullAllRules({ ...cfg, toolPaths: { [tool]: cfg.toolPaths[tool] } }, config('project', [tool]));
+    expect(await (await find([tool], name))!.check()).toBe(true);
+    const file = path.join(projectRoot, tool === 'kimi' ? '.kimi-code/AGENTS.md' : 'AGENTS.md');
+    const delivered = await fse.readFile(file, 'utf8');
+    await fse.writeFile(file, delivered.replace('PROJ-RULE-7', 'STALE-RULE'));
+    expect(await (await find([tool], name))!.check()).toBe(false);
+    await fse.remove(path.join(repoPath, 'rules'));
+    expect(await (await find([tool], name))!.check()).toBe(false);
+    await new RulesHandler().pullAllRules({ ...cfg, toolPaths: { [tool]: cfg.toolPaths[tool] } }, config('project', [tool]));
+    expect((await fse.pathExists(file)) ? await fse.readFile(file, 'utf8') : '').not.toContain('[teamai:team-rules:start]');
+    // With no desired rules and no residual block, doctor omits the passing check.
+    expect(await find([tool], name)).toBeUndefined();
   });
 
   it('pi: fails while teamai\'s extension is missing, naming the rules, and passes once it is installed', async () => {
@@ -330,30 +272,9 @@ describe('doctor checks the hook or extension that adds the project rules (#946)
 });
 
 describe('init and doctor name the limits of the project hooks (#946)', () => {
-  it('notes that ZCode drops the hook text at compaction', async () => {
-    await fse.ensureDir(path.join(homeDir, '.zcode'));
-
-    const notes = await ruleChannelNotes(config('project', ['zcode']));
-
-    expect(notes.some((note) => note.startsWith('ZCode') && note.includes('compact'))).toBe(true);
-  });
-
-  it('notes that DeepSeek Harness needs the patch, can miss the first request, and drops the text at compaction', async () => {
-    await fse.ensureDir(path.join(homeDir, '.dsh'));
-
-    const note = (await ruleChannelNotes(config('project', ['dsh']))).find((n) => n.startsWith('DeepSeek Harness'));
-
-    expect(note).toContain(`--patch "${resolveDshPatchPath()}"`);
-    expect(note).toContain('first request');
-    expect(note).toContain('compact');
-  });
-
-  it('notes DeepSeek Harness where $DSH_HOME says it lives', async () => {
-    const dshHome = path.join(tmpDir, 'dsh-home');
-    await fse.ensureDir(dshHome);
-    vi.stubEnv('DSH_HOME', dshHome);
-
-    expect((await ruleChannelNotes(config('project', ['dsh']))).some((n) => n.startsWith('DeepSeek Harness'))).toBe(true);
+  it.each(['zcode', 'dsh'])('%s: has no session-hook rule limitation while rules are inline', async (tool) => {
+    await fse.ensureDir(path.join(homeDir, `.${tool}`));
+    expect(await ruleChannelNotes(config('project', [tool]))).toEqual([]);
   });
 
   it.each([

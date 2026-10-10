@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 const CLI = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
-const START = '<!-- [teamai:rules:start] -->';
-const END = '<!-- [teamai:rules:end] -->';
+const START = '<!-- [teamai:team-rules:start] -->';
+const END = '<!-- [teamai:team-rules:end] -->';
 
 // Exercise the built CLI with local Git transport: provider credentials and
 // remote hosting APIs are deliberately outside this rule-delivery regression.
@@ -55,6 +55,7 @@ describe('DSH project rules through pull and uninstall (#47)', () => {
     project = path.join(sandbox, 'project');
     repo = path.join(project, '.teamai/team-repo');
     fs.mkdirSync(home, { recursive: true });
+    fs.mkdirSync(path.join(home, '.dsh'), { recursive: true });
     fs.mkdirSync(path.join(repo, 'rules'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'teamai.yaml'), YAML.stringify({ team: 'dsh-regression', repo, provider: 'git', sharing: { recall: { enabled: false } } }));
     fs.writeFileSync(path.join(repo, 'rules/first.md'), '---\npaths: ["src/**"]\n---\nAlways explain the change.\n');
@@ -110,7 +111,7 @@ describe('DSH project rules through pull and uninstall (#47)', () => {
   });
 
   it.each([
-    ['codex', 'dsh'], ['dsh', 'codex'], ['zcode', 'dsh'], ['dsh', 'zcode'],
+    ['zcode', 'dsh'], ['dsh', 'zcode'],
   ])('preserves the shared block when uninstalling %s while %s remains', (removed, remaining) => {
     enable([removed, remaining]);
     cli('pull', '--force');
@@ -126,7 +127,7 @@ describe('DSH project rules through pull and uninstall (#47)', () => {
     cli('pull', '--force');
     rules();
     const output = cli('uninstall', '--agent', 'dsh', '--force');
-    expect(output).toContain('CLAUDE.md rule blocks');
+    expect(output).toContain('Instruction-file blocks');
     expect(output).toContain(path.join(project, 'AGENTS.md'));
     expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toBe('# Personal notes\n');
   });
@@ -138,7 +139,7 @@ describe('DSH project rules through pull and uninstall (#47)', () => {
     fs.writeFileSync(configPath, YAML.stringify(config));
     enable(['claude', 'codex', 'codebuddy', 'opencode']);
     cli('pull', '--force');
-    rules();
+    expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).not.toContain(START);
     expect(fs.existsSync(path.join(project, '.dsh'))).toBe(false);
     for (const agent of ['claude', 'codebuddy', 'opencode']) {
       expect(fs.readFileSync(path.join(project, `.${agent}/rules/first.md`), 'utf8')).toContain('Always explain the change.');

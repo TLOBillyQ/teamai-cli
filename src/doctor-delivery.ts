@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import { expandHome, listFilesRecursive, pathExists, readFileSafe, readJsonObject } from './utils/fs.js';
+import { expandHome, listFilesRecursive, pathExists, readFileSafe } from './utils/fs.js';
 import {
   CODEX_TOOL_ID, DEFAULT_CODEX_ROOT, getDataHome, getMcpSharing, isAgentExcluded, managedMcpManifestKey, resolveToolBaseDir,
   resolveToolRootDir, scopedToolPaths,
@@ -20,7 +20,7 @@ import {
   SHELL_PROFILE_CANDIDATE_NAMES,
 } from './utils/shell-profile.js';
 import { getUserHome } from './utils/home.js';
-import { getsRulesFromExtension, ruleFormatForTool, ruleStemsForTool } from './resources/rule-format.js';
+import { getsRulesFromExtension, inlinesRulesIntoInstructions, ruleFormatForTool, ruleStemsForTool } from './resources/rule-format.js';
 
 /**
  * The checks that verify the payload rather than the plumbing: what each tool
@@ -461,80 +461,37 @@ async function buildRulesActivationChecks(ctx: DoctorContext, items: ResourceIte
   }
 
   checks.push(...await buildUserRulesFileChecks(ctx, items));
-  if (items.length > 0) checks.push(...await buildProjectRulesHookChecks(ctx));
+  checks.push(...await buildProjectRulesInlineChecks(ctx, items));
   return checks;
 }
 
-/**
- * The teamai `hook-dispatch session-start` commands under `SessionStart` in a
- * Claude-shaped map of hook events (ZCode's `hooks.events`, the dsh bridge's
- * `hooks`).
- */
-function sessionStartDispatches(eventMap: unknown): string[] {
-  const groups = (eventMap as Record<string, unknown> | null | undefined)?.SessionStart;
-  if (!Array.isArray(groups)) return [];
-  return groups
-    .flatMap((group) => (Array.isArray(group?.hooks) ? group.hooks : []))
-    .map((entry: { command?: unknown; args?: unknown }) => [entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])].join(' '))
-    .filter((command) => command.includes('hook-dispatch session-start'));
-}
-
-/**
- * In a project, ZCode and DeepSeek Harness get the team rules only from
- * teamai's session-start hook (#946), so doctor checks the hook the tool
- * runs: ZCode reads only the user-level ~/.zcode/cli/config.json, and only
- * with `hooks.enabled`; DeepSeek Harness loads teamai's hook config only
- * through the patch, which the member passes to dsh (`ruleChannelNotes`).
- * Pi's extension is checked with the team instructions it also carries
- * (`buildInstructionDeliveryChecks`).
- */
-async function buildProjectRulesHookChecks(ctx: DoctorContext): Promise<Check[]> {
+/** Check the project instruction files that pull actually inlines team rules into. */
+async function buildProjectRulesInlineChecks(ctx: DoctorContext, items: ResourceItem[]): Promise<Check[]> {
   const { localConfig, teamConfig } = ctx;
   if (!teamConfig || localConfig.scope !== 'project') return [];
-  const paths = scopedToolPaths(teamConfig, localConfig);
-  const home = getUserHome();
-  const inject = 'Run `teamai hooks inject` to rewrite it.';
+
+  const { teamRulesBlock } = await import('./resources/rules.js');
+  const { isInstructionToolInstalled } = await import('./instruction-targets.js');
+  const { TEAMAI_TEAM_RULES_START, TEAMAI_TEAM_RULES_END } = await import('./types.js');
+  const expected = await teamRulesBlock(items);
   const checks: Check[] = [];
-
-  const zcodeSettings = paths.zcode?.settings;
-  if (zcodeSettings && !isAgentExcluded(localConfig, 'zcode') && await pathExists(path.join(home, '.zcode'))) {
-    const file = path.join(home, zcodeSettings);
-    const read = await readJsonObject(file);
-    const hooks = read.kind === 'ok' ? read.value.hooks as { enabled?: unknown; events?: unknown } | undefined : undefined;
-    const registered = sessionStartDispatches(hooks?.events).length > 0;
-    const enabled = hooks?.enabled === true;
+  for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+    if (!inlinesRulesIntoInstructions(tool) || isAgentExcluded(localConfig, tool) || !toolPath.claudemd) continue;
+    if (!await isInstructionToolInstalled(tool, toolPath, localConfig)) continue;
+    const file = path.join(resolveToolBaseDir(tool, localConfig), toolPath.claudemd);
+    const content = await readFileSafe(file);
+    const start = content?.indexOf(TEAMAI_TEAM_RULES_START) ?? -1;
+    const end = content?.indexOf(TEAMAI_TEAM_RULES_END) ?? -1;
+    const delivered = content !== null && start !== -1 && end > start
+      ? content.slice(start, end + TEAMAI_TEAM_RULES_END.length)
+      : null;
     checks.push({
-      name: 'Project rules reach zcode through its SessionStart hook',
+      name: `Project rules are inlined in ${tool} instructions`,
       source: 'local',
-      check: async () => registered && enabled,
-      fix: read.kind === 'invalid'
-        ? `${file} is not valid JSON (${read.error}), so ZCode loads none of its hooks and sessions in this project `
-          + 'get none of the team rules. Fix the file by hand (teamai does not rewrite a file it cannot parse), then run '
-          + '`teamai hooks inject`.'
-        : !registered
-          ? `${file} has no teamai SessionStart hook, so ZCode sessions in this project get none of the team rules: `
-            + `ZCode runs only the hooks in this file, none from a project. ${inject}`
-          : `${file} sets hooks.enabled to something other than true, so ZCode runs none of its hooks and sessions in `
-            + 'this project get none of the team rules. Run `teamai hooks inject`, which turns them on.',
-    });
-  }
-
-  const { isDshInstalled } = await import('./dsh-hooks.js');
-  if (!isAgentExcluded(localConfig, 'dsh') && await isDshInstalled()) {
-    const { buildDshPatch, resolveDshHookConfigPath, resolveDshPatchPath } = await import('./dsh-hooks.js');
-    const configPath = resolveDshHookConfigPath();
-    const patchPath = resolveDshPatchPath();
-    const patched = await readFileSafe(patchPath) === buildDshPatch(configPath);
-    const read = await readJsonObject(configPath);
-    const registered = read.kind === 'ok' && sessionStartDispatches(read.value.hooks).length > 0;
-    const broken = [...(patched ? [] : [patchPath]), ...(registered ? [] : [configPath])];
-    checks.push({
-      name: 'Project rules reach dsh through its session-start hook',
-      source: 'local',
-      check: async () => broken.length === 0,
-      fix: `${broken.join(' and ')} ${broken.length === 1 ? 'is' : 'are'} missing or out of date, so DeepSeek Harness `
-        + 'sessions in this project get none of the team rules. Run `teamai hooks inject` to rewrite '
-        + `${broken.length === 1 ? 'it' : 'them'}. dsh loads that hook only when it runs with \`--patch "${patchPath}"\`.`,
+      check: async () => delivered === expected,
+      fix: delivered === null && expected !== null
+        ? `${file} carries no team-rules block, so ${tool} reads none of the project team rules. Run \`teamai pull\` to restore it.`
+        : `The team-rules block in ${file} is not what this project's team rules inline to. Run \`teamai pull\` to rewrite it.`,
     });
   }
   return checks;
@@ -544,9 +501,10 @@ async function buildProjectRulesHookChecks(ctx: DoctorContext): Promise<Check[]>
  * In user scope each tool with no rules format reads the team rules from a
  * managed block of a file only it reads (`userRulesFile`: the Codex family's
  * AGENTS.md, #938; ZCode, DeepSeek Harness, the OpenClaw workspace, Pi,
- * JoyCode's rules.txt, #946); in a project the session-start hook (the Codex
- * family, ZCode, DeepSeek Harness) or Pi's extension adds them, and doctor
- * checks that channel instead. One check per enabled,
+ * JoyCode's rules.txt, #946); in a project the Codex family's session-start
+ * hook or Pi's extension adds them, while ZCode, DeepSeek Harness and Kimi
+ * read an inline block from their project instructions. Doctor checks each
+ * actual channel. One check per enabled,
  * installed tool, on the bytes of the block in the file the tool reads.
  */
 async function buildUserRulesFileChecks(ctx: DoctorContext, items: ResourceItem[]): Promise<Check[]> {

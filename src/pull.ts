@@ -1542,7 +1542,6 @@ async function pullForScope(
   // which they fix without a new team revision, so the next pull must sync
   // again to deliver what was held.
   let agentModelsHeld = false;
-  let knownRepoSkillNames: Set<string> | null = null;
   // name → team-repo source dir, for the data-safety check in Step 3b cleanup.
   let knownRepoSkillSources: Map<string, string> | null = null;
   // Root skills (no namespace) are the tag catalog: one of them removed by
@@ -1650,7 +1649,6 @@ async function pullForScope(
       items = desired.items.filter((item) => !ambiguous.has(item.name));
       skippedByTags = desired.skippedByTags;
       desiredSkillNames = new Set(items.map((i) => i.name));
-      knownRepoSkillNames = new Set(desired.teamItems.filter((item) => !ambiguous.has(item.name)).map((i) => i.name));
       knownRepoSkillSources = new Map(desired.teamItems.filter((item) => !ambiguous.has(item.name)).map((i) => [i.name, i.sourcePath]));
       rootRepoSkillNames = new Set(desired.teamItems.filter((i) => !i.namespace).map((i) => i.name));
     } else if (type === 'agents') {

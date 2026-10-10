@@ -72,6 +72,10 @@ and give it your team repo URL."*
   `$DSH_HOME/AGENTS.md`, the OpenClaw workspace `AGENTS.md`,
   `~/.pi/agent/AGENTS.md`, `~/.joycode/rules.txt`), and the file when teamai
   created it for the block alone.
+- Kimi inline rules use `.kimi-code/AGENTS.md`. In projects, ZCode and DSH
+  share the team-rules block in the root `AGENTS.md`. Targeted uninstall
+  preserves every block still used by another installed tool, and keeps personal
+  content outside managed blocks. Codex project rules use session hooks.
 - Uninstall cleans legacy Codex rule copies at the recorded `toolRoots`
   location, including publishers' bare local filenames, and the copies earlier
   releases left in a project's `.workbuddy/rules` and `.pi/rules`, in
