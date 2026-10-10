@@ -42,6 +42,7 @@ import {
   buildDocsCheck,
 } from './doctor-delivery.js';
 import { agentModelNotes, aliasNamespaceNotes, buildAgentModelChecks } from './doctor-agent-models.js';
+import { builtinHookDefs } from './builtin-hooks.js';
 
 /**
  * Where a check gets its answer. `provider` checks shell out to a provider CLI
@@ -339,8 +340,8 @@ function sessionHookRulesCheck(tool: string, settingsPath: string): Check {
     name: `Project rules and instructions reach ${tool} whole through its session hooks`,
     source: 'local',
     check: async () => {
-      const sessionStart = await teamaiHookEntries(settingsPath, 'SessionStart', 'session-start');
-      const subagentStart = await teamaiHookEntries(settingsPath, 'SubagentStart', 'subagent-start');
+      const sessionStart = await teamaiHookEntries(tool, settingsPath, 'SessionStart');
+      const subagentStart = await teamaiHookEntries(tool, settingsPath, 'SubagentStart');
       return [sessionStart, subagentStart].every((entries) => entries.some((entry) => entry.additionalContextLimit === 0));
     },
     fix: `The teamai SessionStart and SubagentStart entries in ${settingsPath} must both exist and set `
@@ -354,9 +355,9 @@ function sessionHookRulesCheck(tool: string, settingsPath: string): Check {
 
 /** The teamai handlers for one event in a Codex hooks.json; none when it does not parse. */
 async function teamaiHookEntries(
+  tool: string,
   settingsPath: string,
   event: 'SessionStart' | 'SubagentStart',
-  subcommand: string,
 ): Promise<Array<{ additionalContextLimit?: unknown }>> {
   let parsed: unknown;
   try {
@@ -369,7 +370,14 @@ async function teamaiHookEntries(
   return groups
     .flatMap((group) => (Array.isArray(group?.hooks) ? group.hooks : []))
     .filter((entry): entry is { command: string; additionalContextLimit?: unknown } =>
-      typeof entry?.command === 'string' && entry.command.includes(`teamai hook-dispatch ${subcommand}`));
+      typeof entry?.command === 'string' && isTeamaiStartHookCommand(tool, event, entry.command));
+}
+
+/** A generated command for this event, or a legacy dispatch with the event as its own token. */
+function isTeamaiStartHookCommand(tool: string, event: 'SessionStart' | 'SubagentStart', command: string): boolean {
+  const dispatchEvent = event === 'SessionStart' ? 'session-start' : 'subagent-start';
+  return builtinHookDefs(tool).some((def) => def.event === event && def.command === command)
+    || new RegExp(`(^|[^-\\w])teamai hook-dispatch ${dispatchEvent}(?![-\\w])`).test(command);
 }
 
 

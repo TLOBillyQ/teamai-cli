@@ -49,7 +49,9 @@ TeamAI 通过上游 `codex app-server` API 自动信任自身管理的钩子，�
 `getDispatchCommand()` 将动态 shell 路径和 dispatch 命令内容编码为 Base64，在
 Windows PowerShell 中解码后调用 Git Bash。这会保留经过外层 cmd.exe、PowerShell 或
 Git Bash 的空格与字面量 `$`，shell 运算符仍位于带引号的 `-Command` 参数内部。
-可见的 `# teamai hook-dispatch` 标记用于识别、更新与移除 TeamAI 管理的命令。
+可见的 `# teamai hook-dispatch` 标记用于识别、更新与移除 TeamAI 管理的命令；
+doctor 也会识别这些生成的命令，并兼容旧版明文 dispatch。`SessionStart` 与
+`SubagentStart` 两条钩子都必须设置数字类型的 `additionalContextLimit: 0`。
 此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的 Git Bash；若无法解析
 Git Bash 路径，启动器会退回裸 `bash`，可能选中 WSL。其他工具保持原有命令。
 

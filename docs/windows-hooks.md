@@ -56,7 +56,10 @@ Only Windows Codex uses this command shape (example Git Bash location):
 then decodes them in Windows PowerShell before invoking Git Bash. This preserves
 spaces and literal `$` characters through the outer cmd.exe, PowerShell, or Git
 Bash; shell operators stay inside the quoted `-Command` payload. The visible
-`# teamai hook-dispatch` marker lets TeamAI reconcile and remove managed commands.
+`# teamai hook-dispatch` marker lets TeamAI reconcile and remove managed commands,
+and doctor recognizes these generated commands as well as legacy plaintext
+dispatch. Both `SessionStart` and `SubagentStart` entries must set numeric
+`additionalContextLimit: 0`.
 This requires `powershell.exe` on the hook process's `PATH` and Git Bash installed;
 without a resolved Git Bash path, the launcher falls back to bare `bash`, which
 may select WSL. Other tools keep their existing commands.
