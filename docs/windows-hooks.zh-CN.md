@@ -28,9 +28,34 @@ WorkBuddy 使用其自带的 PortableGit `sh.exe`，**CodeBuddy 使用它在 Win
 
 ---
 
-## TeamAI 钩子简介（回顾）
+## 当前 Windows Codex 钩子
 
-`teamai hooks inject` 会向每个代理的配置文件中写入类似如下的命令：
+升级后运行 `teamai hooks inject`，更新 v0.27.0 在 `~/.codex/hooks.json` 中的**全部八条**
+内置钩子：`SessionStart`、`Stop`、`PostToolUse`（`*`、`Skill`、`TodoWrite`）、
+`UserPromptSubmit`、`SubagentStart` 和 `SubagentStop`。`SessionStart` 与
+`SubagentStart` 设置 `additionalContextLimit: 0`，让 Codex 保留完整的附加上下文。
+
+TeamAI 通过上游 `codex app-server` API 自动信任自身管理的钩子，精确匹配钩子的 key、
+文件与命令。若自动信任不可用或失败，或在 `~/.teamai/config.yaml` 中设置了
+`codexTrustEnabled: false`，请在 Codex `/hooks` 或 Settings → Hooks 中手动审核并
+信任变更后的钩子，然后打开新会话。
+
+仅 Windows Codex 使用以下命令形式（以常见 Git Bash 安装位置为例）：
+
+```json
+"command": "powershell.exe -NoProfile -NonInteractive -Command \"& ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('QzovUHJvZ3JhbSBGaWxlcy9HaXQvYmluL2Jhc2guZXhl'))) -lc ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('dGVhbWFpIGhvb2stZGlzcGF0Y2ggc2Vzc2lvbi1zdGFydCAtLXRvb2wgY29kZXggMj4vZGV2L251bGwgfHwgdHJ1ZQ=='))); exit 0 # teamai hook-dispatch\""
+```
+
+`getDispatchCommand()` 将动态 shell 路径和 dispatch 命令内容编码为 Base64，在
+Windows PowerShell 中解码后调用 Git Bash。这会保留经过外层 cmd.exe、PowerShell 或
+Git Bash 的空格与字面量 `$`，shell 运算符仍位于带引号的 `-Command` 参数内部。
+可见的 `# teamai hook-dispatch` 标记用于识别、更新与移除 TeamAI 管理的命令。
+此命令依赖钩子进程 `PATH` 中的 `powershell.exe` 及已安装的 Git Bash；若无法解析
+Git Bash 路径，启动器会退回裸 `bash`，可能选中 WSL。其他工具保持原有命令。
+
+## 旧版 TeamAI 钩子简介（回顾）
+
+旧版 `teamai hooks inject` 会向每个代理的配置文件中写入类似如下的命令：
 
 ```json
 "command": "bash -lc \"teamai hook-dispatch session-start --tool claude 2>/dev/null\" || true"
@@ -93,7 +118,7 @@ export function hasShell(): boolean {
 
 ---
 
-## 修复方案（用户侧，持久化）
+## 旧版绕行方案（用户侧，持久化）
 
 ### 机制 A — 在每个代理配置文件中使用 Git Bash 的绝对路径
 
@@ -107,7 +132,7 @@ export function hasShell(): boolean {
 此修改适用于所有带钩子的代理：
 
 - `~/.claude/settings.json` — 6 个钩子
-- `~/.codex/hooks.json` — 6 个钩子
+- `~/.codex/hooks.json`：旧版有 6 个钩子；v0.27.0 有 8 个，使用上文的 PowerShell 命令
 - `~/.zcode/cli/config.json` — `command` 字段 → Git Bash 路径；6 个钩子
 - `~/.codebuddy/settings.json` — 若不存在则创建；6 个钩子
 - `~/.qoder/settings.json` — 若不存在则创建；6 个钩子
@@ -119,7 +144,7 @@ export function hasShell(): boolean {
 
 ### 机制 B — WSL 包装脚本（抵御 `teamai pull` 的持久化）
 
-`teamai pull` / `hooks inject` 会把代理配置重新写回裸 `bash`。机制 A 会被覆盖，但
+旧版 `teamai pull` / `hooks inject` 会把代理配置重新写回裸 `bash`。机制 A 会被覆盖，但
 WSL 包装脚本能让裸 `bash` 依然可用。在你的 WSL 家目录（如
 `/home/<user>/.teamai-wsl/bin/teamai`）创建包装脚本：
 
@@ -178,7 +203,7 @@ dispatch (裸 bash/WSL):  claude=0 codex=0 zcode=0 codebuddy=0 qoder=0 qoder-cn=
 
 ## 限制 / 无法做到的事
 
-- **持久化依赖 WSL 包装脚本.** `teamai pull` 会把代理配置还原成裸 `bash`；机制 A 被
+- **旧版的持久化依赖 WSL 包装脚本.** 旧版 `teamai pull` 会把代理配置还原成裸 `bash`；机制 A 被
   覆盖，机制 B 仅在 **WSL 保持安装** 时有效。若移除 WSL，裸 `bash` 钩子会再次失效。
 - **机制 B 需要 WSL.** 在没有 WSL 的机器上，只有机制 A（当前配置文件中的 Git Bash
   绝对路径）可用。
@@ -233,9 +258,9 @@ export function hasShell(): boolean {
 
 ### 2. 在 Windows 上把 dispatch 命令默认指向 Git Bash 绝对路径
 
-`getDispatchCommand()` 硬编码了 `bash -lc "..."`。在 Windows 上这会被解析到 WSL 的
-Node 18 并崩溃。当 `process.platform === 'win32'` 时，应优先使用 Git Bash 的绝对路径
-（或自带的 PortableGit `sh.exe`）。
+`getDispatchCommand()` 过去硬编码了 `bash -lc "..."`，可能在 Windows 上选中 WSL。
+当前版本会解析 Git Bash 的绝对路径；Windows Codex 额外使用上文所述的 PowerShell
+包装命令。
 
 两处改动均向后兼容：macOS/Linux 仍使用 `/bin/sh`，而 Windows 用户将不再需要上面的
 手工绕行方案。
@@ -275,7 +300,7 @@ wsl bash -lc "teamai hook-dispatch session-start --tool claude 2>/dev/null"; ech
 | 文件 | 改动 |
 |------|------|
 | `~/.claude/settings.json` | 钩子命令 → Git Bash 绝对路径（备份：`*.teamai-bak`） |
-| `~/.codex/hooks.json` | 钩子命令 → Git Bash 绝对路径（备份：`*.teamai-bak`） |
+| `~/.codex/hooks.json` | v0.27.0：重新注入全部 8 条动态参数经 Base64 编码的 PowerShell 命令；自动信任自身管理的钩子，不可用、失败或 `codexTrustEnabled: false` 时手动信任 |
 | `~/.zcode/cli/config.json` | `command` 字段 → Git Bash 路径（备份：`*.teamai-bak`） |
 | `~/.codebuddy/settings.json` | 若不存在则创建，含 6 个钩子 |
 | `~/.qoder/settings.json` | 若不存在则创建，含 6 个钩子 |

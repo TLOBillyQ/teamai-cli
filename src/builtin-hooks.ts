@@ -209,7 +209,16 @@ function getHookShellCommand(): string {
 export function getDispatchCommand(event: string, tool: string, matcher?: string, binPath?: string): string {
   const bin = binPath ?? 'teamai';
   const matcherArg = matcher && matcher !== '*' ? ` --matcher ${matcher}` : '';
-  return `${getHookShellCommand()} -lc "${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null" || true`;
+  const dispatch = `${bin} hook-dispatch ${event} --tool ${tool}${matcherArg} 2>/dev/null`;
+  if (process.platform === 'win32' && tool === 'codex') {
+    // Codex inherits its host shell. Encode dynamic strings so PowerShell,
+    // cmd.exe and Git Bash cannot expand path characters before invocation.
+    const decode = (value: string) => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value).toString('base64')}'))`;
+    const shell = decode(getHookShellCommand().replace(/^"|"$/g, ''));
+    // Keep the managed-command marker visible for reconciliation and removal.
+    return `powershell.exe -NoProfile -NonInteractive -Command "& (${shell}) -lc (${decode(`${dispatch} || true`)}); exit 0 # teamai hook-dispatch"`;
+  }
+  return `${getHookShellCommand()} -lc "${dispatch}" || true`;
 }
 
 /**

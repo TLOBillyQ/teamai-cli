@@ -32,10 +32,39 @@ and every `hook-dispatch` call returns `exit=0` through both mechanisms.
 
 ---
 
-## How TeamAI hooks work (quick recap)
+## Current Windows Codex hooks
 
-`teamai hooks inject` writes a command like this into each agent's settings
-file:
+Run `teamai hooks inject` after upgrading to refresh **all eight** built-in entries
+in `~/.codex/hooks.json` for v0.27.0: `SessionStart`, `Stop`, `PostToolUse` (`*`,
+`Skill`, `TodoWrite`), `UserPromptSubmit`, `SubagentStart`, and `SubagentStop`.
+`SessionStart` and `SubagentStart` set `additionalContextLimit: 0` so Codex keeps
+the full additional context.
+
+TeamAI uses the upstream `codex app-server` API to automatically trust exactly
+its owned hooks, matching their key, file, and command. If automatic trust is
+unavailable or fails, or you set `codexTrustEnabled: false` in
+`~/.teamai/config.yaml`, review and trust the changed hooks manually in Codex
+`/hooks` or Settings → Hooks. Then open a fresh session.
+
+Only Windows Codex uses this command shape (example Git Bash location):
+
+```json
+"command": "powershell.exe -NoProfile -NonInteractive -Command \"& ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('QzovUHJvZ3JhbSBGaWxlcy9HaXQvYmluL2Jhc2guZXhl'))) -lc ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('dGVhbWFpIGhvb2stZGlzcGF0Y2ggc2Vzc2lvbi1zdGFydCAtLXRvb2wgY29kZXggMj4vZGV2L251bGwgfHwgdHJ1ZQ=='))); exit 0 # teamai hook-dispatch\""
+```
+
+`getDispatchCommand()` Base64-encodes the dynamic shell path and dispatch payload,
+then decodes them in Windows PowerShell before invoking Git Bash. This preserves
+spaces and literal `$` characters through the outer cmd.exe, PowerShell, or Git
+Bash; shell operators stay inside the quoted `-Command` payload. The visible
+`# teamai hook-dispatch` marker lets TeamAI reconcile and remove managed commands.
+This requires `powershell.exe` on the hook process's `PATH` and Git Bash installed;
+without a resolved Git Bash path, the launcher falls back to bare `bash`, which
+may select WSL. Other tools keep their existing commands.
+
+## How older TeamAI hooks worked (quick recap)
+
+Older `teamai hooks inject` versions wrote a command like this into each agent's
+settings file:
 
 ```json
 "command": "bash -lc \"teamai hook-dispatch session-start --tool claude 2>/dev/null\" || true"
@@ -101,7 +130,7 @@ skipped.
 
 ---
 
-## The fix (user-side, durable)
+## Older-version workaround (user-side, durable)
 
 ### Mechanism A — Git Bash absolute path in every agent settings file
 
@@ -115,7 +144,7 @@ path (adjust if Git is installed elsewhere):
 Apply this to every agent that has hooks:
 
 - `~/.claude/settings.json` — 6 hooks
-- `~/.codex/hooks.json` — 6 hooks
+- `~/.codex/hooks.json`: 6 hooks in older versions; v0.27.0 has 8 and uses the PowerShell command above
 - `~/.zcode/cli/config.json` — `command` field → Git Bash path; 6 hooks
 - `~/.codebuddy/settings.json` — create if missing; 6 hooks
 - `~/.qoder/settings.json` — create if missing; 6 hooks
@@ -127,7 +156,7 @@ escaped). Keep a `*.teamai-bak` copy of each original file so you can roll back.
 
 ### Mechanism B — WSL wrapper (durability against `teamai pull`)
 
-`teamai pull` / `hooks inject` rewrites the agent settings back to bare `bash`.
+Older `teamai pull` / `hooks inject` versions rewrite the agent settings back to bare `bash`.
 Mechanism A gets overwritten, but a WSL wrapper keeps bare `bash` working.
 Create a wrapper at your WSL home (e.g. `/home/<user>/.teamai-wsl/bin/teamai`):
 
@@ -189,7 +218,7 @@ dispatch (bare bash/WSL): claude=0 codex=0 zcode=0 codebuddy=0 qoder=0 qoder-cn=
 
 ## Limitations / what it can't do
 
-- **Durability depends on the WSL wrapper.** `teamai pull` reverts agent
+- **Older-version durability depends on the WSL wrapper.** Old `teamai pull` versions revert agent
   settings to bare `bash`; Mechanism A is overwritten, Mechanism B keeps it
   working *only while WSL is installed*. If WSL is removed, bare-`bash` hooks
   break again.
@@ -250,9 +279,9 @@ Current `teamai` achieves this through `hasShellFor()` → `bundledShellFor()`, 
 
 ### 2. Default the dispatch command to an absolute Git Bash path on Windows
 
-`getDispatchCommand()` hard-codes `bash -lc "..."`. On Windows that resolves to
-WSL's Node 18 and crashes. Prefer the Git Bash absolute path (or the bundled
-PortableGit `sh.exe`) when `process.platform === 'win32'`.
+`getDispatchCommand()` used to hard-code `bash -lc "..."`, which could select
+WSL on Windows. Current versions resolve an absolute Git Bash path; Windows
+Codex adds the PowerShell wrapper described above.
 
 Both changes are backward compatible: macOS/Linux keep `/bin/sh`, and Windows
 users stop needing the manual workaround above.
@@ -295,7 +324,7 @@ wsl bash -lc "teamai hook-dispatch session-start --tool claude 2>/dev/null"; ech
 | File | Change |
 |------|--------|
 | `~/.claude/settings.json` | hook commands → Git Bash absolute path (backup: `*.teamai-bak`) |
-| `~/.codex/hooks.json` | hook commands → Git Bash absolute path (backup: `*.teamai-bak`) |
+| `~/.codex/hooks.json` | v0.27.0: re-inject all 8 PowerShell commands with Base64-encoded dynamic arguments; automatic trust for owned hooks, manual fallback if unavailable, failed, or `codexTrustEnabled: false` |
 | `~/.zcode/cli/config.json` | `command` field → Git Bash path (backup: `*.teamai-bak`) |
 | `~/.codebuddy/settings.json` | created with 6 hooks (if missing) |
 | `~/.qoder/settings.json` | created with 6 hooks (if missing) |

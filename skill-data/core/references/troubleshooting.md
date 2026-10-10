@@ -231,6 +231,16 @@ Unrecorded or ambiguous legacy team-hook copies are preserved. Project hook path
 Claude uses `settings.local.json` beside its configured settings file. A custom
 Codex path that Codex does not load is reported as `not loaded` by doctor.
 
+On Windows, after upgrading, run `teamai hooks inject` to replace all six legacy
+commands and install the eight current built-in entries, including subagent start
+and stop. Hook trust follows the app-server flow above; reopen the Codex session
+after updating. Codex alone uses `powershell.exe -NoProfile -NonInteractive -Command`
+with encoded dynamic arguments to invoke the absolute Git Bash path, preserving
+spaces and `$` across cmd.exe, PowerShell and Git Bash. Check that `powershell.exe`
+is on the hook process's `PATH` and Git Bash is installed; without a resolved Git
+Bash path, the launcher falls back to bare `bash` and may select WSL. Other tools
+keep their existing commands.
+
 ### Cursor
 
 Cursor writes hooks to `~/.cursor/hooks.json` and also runs `~/.claude/settings.json`. `hook-dispatch --tool claude` and team hook commands written for `claude` exit only when `CURSOR_VERSION` is set and `~/.cursor/hooks.json` or `$CURSOR_PROJECT_DIR/.cursor/hooks.json` contains `--tool cursor`. A setup with only Claude has no second copy, so those hooks still run inside Cursor. Claude Code does not set `CURSOR_VERSION`. An already installed team hook picks up the guard on the next `teamai pull` or `teamai hooks inject`. If `teamai hooks list` shows Cursor without hooks, run `teamai pull` at the start of the session.
