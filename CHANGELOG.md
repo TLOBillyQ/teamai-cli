@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## 0.27.1-gitea.0 (2026-10-10)
+
+- `teamai doctor` now recognizes the encoded Windows Codex start hooks the CLI itself generates, fixing the false failure of `Project rules and instructions reach codex whole through its session hooks`; legacy plaintext dispatch stays recognized and both start hooks still require numeric `additionalContextLimit: 0` ([TLOBillyQ/teamai-cli#7](https://github.com/TLOBillyQ/teamai-cli/issues/7), PR [#8](https://github.com/TLOBillyQ/teamai-cli/pull/8)).
+- Published as `@agent/teamai-cli` to the Gitea package registry.
+
 ## Fork 0.27.0 (unreleased)
 
 Rebuilt on the official upstream `v0.27.0` release (`40f36f0`), retaining Gitea authentication, Kimi Code CLI, merged `toolPaths`, deterministic scans, duplicate-skill checks, recall markers and the Gitea package configuration.
