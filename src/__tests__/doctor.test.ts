@@ -71,6 +71,7 @@ import { TEAMAI_HOOK_SUBCOMMANDS, readCodexHookTrustForScope } from '../hooks.js
 import { log, setStderrOnly } from '../utils/logger.js';
 import { isGfInstalled, gfIsAuthenticated } from '../providers/tgit/index.js';
 import { buildChecks, doctor, resolveDoctorContext } from '../doctor.js';
+import { builtinHookDefs } from '../builtin-hooks.js';
 import type { DoctorReport } from '../doctor.js';
 
 const mockedLoadLocalConfig = loadLocalConfig as Mock;
@@ -737,6 +738,21 @@ describe('buildChecks — the Codex team rules hook (#938)', () => {
         return (await buildChecks(ctx)).find((c) => c.name === NAME);
     }
 
+    it('passes for generated Windows Codex start hooks with numeric zero limits', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        try {
+            const defs = builtinHookDefs('codex');
+            const session = defs.find((def) => def.event === 'SessionStart')!;
+            const subagent = defs.find((def) => def.event === 'SubagentStart')!;
+            expect(session.command).toContain('FromBase64String');
+            const check = await codexCheck(sessionStart({ ...session }, { ...subagent }));
+
+            expect(await check!.check()).toBe(true);
+        } finally {
+            platform.mockRestore();
+        }
+    });
+
     it('passes when the teamai session-start entry sets additionalContextLimit 0', async () => {
         const check = await codexCheck(sessionStart({ command: DISPATCH, additionalContextLimit: 0 }));
 
@@ -751,6 +767,41 @@ describe('buildChecks — the Codex team rules hook (#938)', () => {
         expect(check!.fix).toContain('additionalContextLimit');
         expect(check!.fix).toContain('teamai pull');
         expect(check!.fix).toContain('/hooks');
+    });
+
+    it('rejects a generated Windows SessionStart command used as SubagentStart', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        try {
+            const defs = builtinHookDefs('codex');
+            const session = defs.find((def) => def.event === 'SessionStart')!;
+            const check = await codexCheck(sessionStart({ command: session.command, additionalContextLimit: 0 }, { command: session.command, additionalContextLimit: 0 }));
+
+            expect(await check!.check()).toBe(false);
+        } finally {
+            platform.mockRestore();
+        }
+    });
+
+    it('rejects a generic hook-dispatch marker that names no event', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        try {
+            const defs = builtinHookDefs('codex');
+            const generic = defs.find((def) => def.event === 'SessionStart')!.command.replace(/FromBase64String\('[^']+'\)/g, "FromBase64String('')");
+            const check = await codexCheck(sessionStart({ command: generic, additionalContextLimit: 0 }, { command: generic, additionalContextLimit: 0 }));
+
+            expect(await check!.check()).toBe(false);
+        } finally {
+            platform.mockRestore();
+        }
+    });
+
+    it('rejects a plaintext dispatch with an event-name suffix', async () => {
+        const check = await codexCheck(sessionStart(
+            { command: 'teamai hook-dispatch session-start-extra --tool codex', additionalContextLimit: 0 },
+            { command: SUBAGENT, additionalContextLimit: 0 },
+        ));
+
+        expect(await check!.check()).toBe(false);
     });
 
     it('fails when the teamai SessionStart entry is missing', async () => {
@@ -777,6 +828,20 @@ describe('buildChecks — the Codex team rules hook (#938)', () => {
         expect(await check!.check()).toBe(false);
         expect(check!.fix).toContain('SubagentStart');
         expect(check!.fix).toContain('Run `teamai pull`');
+    });
+
+    it.each([
+        ['positive', 1],
+        ['string "0"', '0'],
+        ['false', false],
+        ['null', null],
+    ])('fails when the limit is %s', async (_label, limit) => {
+        const check = await codexCheck(sessionStart(
+            { command: DISPATCH, additionalContextLimit: limit },
+            { command: SUBAGENT, additionalContextLimit: 0 },
+        ));
+
+        expect(await check!.check()).toBe(false);
     });
 
     it('asks nothing of a tool that reads its own rules directory', async () => {
