@@ -1001,6 +1001,11 @@ export class RulesHandler extends ResourceHandler {
         }
         file = target?.file;
         if (target === undefined || file === undefined) continue;
+        // Retire the pre-0.27.0 rules block from the same file: the generic
+        // legacy cleanup skips the tools this path serves (they inline rules),
+        // so an upgraded install would otherwise keep the stale rules beside —
+        // or instead of — the current block forever.
+        await removeClaudeMdSection(file, TEAMAI_RULES_START, TEAMAI_RULES_END, { deleteIfEmpty: true });
         const wanted = target.installed && !isAgentExcluded(localConfig, tool) ? block : null;
         writing = wanted !== null;
         if (wanted !== null) {

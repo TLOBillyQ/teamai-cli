@@ -294,6 +294,83 @@ describe('a user-scope rules sync puts the team rules in a file only the tool re
   });
 });
 
+/**
+ * A pre-0.27.0 user-scope sync inlined the team rules under the
+ * `[teamai:rules]` markers; 0.27.0 manages the `[teamai:team-rules]` block in
+ * the same files. The pull must retire the legacy block: the generic legacy
+ * cleanup skips these tools on purpose, so nothing else ever removes it.
+ */
+describe('a user-scope pull retires the pre-0.27.0 rules block from the file the tool reads', () => {
+  const LEGACY_BLOCK = '<!-- [teamai:rules:start] -->\n'
+    + '<!-- DO NOT EDIT: This section is auto-managed by teamai -->\n\n'
+    + 'A stale rule from before the upgrade.\n\n'
+    + '<!-- [teamai:rules:end] -->';
+
+  // Kimi keeps the legacy block in its configured claudemd, Codex in its user
+  // AGENTS.md (its family shares the entry); TOOLS covers the rest.
+  const MIGRATION_TOOLS: ReadonlyArray<{ tool: string; root: string; file: string }> = [
+    { tool: 'kimi', root: '.kimi-code/skills', file: '.kimi-code/AGENTS.md' },
+    { tool: 'codex', root: '.codex', file: '.codex/AGENTS.md' },
+    ...TOOLS,
+  ];
+
+  it.each(MIGRATION_TOOLS)('$tool: a legacy block becomes the team-rules block, the member\'s text intact', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `# My notes\n\n${LEGACY_BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]));
+
+    expect(await fse.readFile(home(file), 'utf8')).toBe(`# My notes\n\n${BLOCK}\n`);
+  });
+
+  it.each(MIGRATION_TOOLS)('$tool: a legacy block goes when the team has no rules, the member\'s text intact', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `# My notes\n\n${LEGACY_BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]), []);
+
+    expect(await fse.readFile(home(file), 'utf8')).toBe('# My notes\n');
+  });
+
+  it.each(MIGRATION_TOOLS)('$tool: a file damaged with both blocks keeps only the team-rules one', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `# My notes\n\n${LEGACY_BLOCK}\n\n${BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]));
+
+    expect(await fse.readFile(home(file), 'utf8')).toBe(`# My notes\n\n${BLOCK}\n`);
+  });
+
+  it.each(MIGRATION_TOOLS)('$tool: a file that held only the legacy block is replaced by the team-rules file', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `${LEGACY_BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]));
+
+    expect(await fse.readFile(home(file), 'utf8')).toBe(`${BLOCK}\n`);
+  });
+
+  it.each(MIGRATION_TOOLS)('$tool: a file that held only the legacy block goes with it when the team has no rules', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `${LEGACY_BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]), []);
+
+    expect(await fse.pathExists(home(file))).toBe(false);
+  });
+
+  it.each(MIGRATION_TOOLS)('$tool: two pulls leave the file byte-identical', async ({ tool, root, file }) => {
+    await fse.ensureDir(home(root));
+    await fse.writeFile(home(file), `# My notes\n\n${LEGACY_BLOCK}\n`);
+
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]));
+    const once = await fse.readFile(home(file), 'utf8');
+    await new RulesHandler().pullAllRules(teamConfig(), config('user', [tool]));
+
+    expect(await fse.readFile(home(file), 'utf8')).toBe(once);
+  });
+});
+
 const LEGACY: ReadonlyArray<{ tool: string; scope: 'user' | 'project'; root: string; dir: string; copy: (raw: string) => string; ext: string }> = [
   { tool: 'openclaw', scope: 'user', root: '.openclaw/workspace', dir: '.openclaw/rules', copy: (raw) => raw, ext: '.md' },
   { tool: 'openclaw', scope: 'project', root: '.openclaw', dir: '.openclaw/rules', copy: (raw) => raw, ext: '.md' },
